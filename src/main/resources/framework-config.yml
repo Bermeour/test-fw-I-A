@@ -1,0 +1,49 @@
+framework:
+  name: self-healing-framework
+  appName: MY_APP
+
+driver:
+  browser: CHROME
+  baseUrl: http://localhost:9000
+  headless: false
+
+smart:
+  enabled: true
+  mode: AUTO
+  minScore: 80
+  repairUrl: http://localhost:8765/repair
+  dbUrl: jdbc:sqlite:repair-history.db
+  strictUniqueness: true
+  clickableWaitSeconds: 2
+  maxAttempts: 2
+  recoveryEnabled: true
+  watchdogEnabled: true
+  allowHighRisk: false
+  allowCriticalRisk: false
+
+watchdog:
+  enabled: true
+  loadersBlockExecution: true
+  overlaysBlockExecution: true
+  loaderSelectors:
+    - ".spinner"
+    - ".loading"
+    - ".loader"
+  overlaySelectors:
+    - ".modal-backdrop"
+    - ".overlay"
+  modalSelectors:
+    - "[role='dialog']"
+    - "[id*='modal' i]"
+  errorSelectors:
+    - ".error"
+    - ".alert-danger"
+
+stability:
+  defaultTimeoutSeconds: 8
+  pollingMillis: 250
+  maxRetries: 0
+  waitForDocumentReady: true
+  waitForJQueryInactive: false
+  fastRecoveryTimeoutSeconds: 2
+  stabilityCacheWindowMillis: 800

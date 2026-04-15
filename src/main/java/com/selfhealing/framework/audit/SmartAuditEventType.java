@@ -1,0 +1,37 @@
+package com.selfhealing.framework.audit;
+
+public enum SmartAuditEventType {
+
+    // Lifecycle
+    START,
+    SMART_DISABLED,
+    MODE_SELECTED,
+    FINAL_FAIL,
+
+    // Directo
+    DIRECT_TRY,
+    DIRECT_SUCCESS,
+    DIRECT_FAIL,
+    PROBE_REJECTED,
+
+    // DRY_RUN
+    DRY_RUN_ABORT,
+
+    // Cache
+    CACHE_LOOKUP,
+    CACHE_MISS,
+    CACHE_APPLIED,
+    CACHE_APPLY_FAIL,
+    CACHE_REJECTED_PROBE,
+    CACHE_REJECTED_RISK,
+    CACHE_SKIPPED_MODE,
+
+    // IA
+    IA_REQUEST,
+    IA_RESPONSE,
+    IA_SUGGESTION_SKIPPED_SCORE,
+    IA_SUGGESTION_SKIPPED_RISK,
+    IA_SUGGESTION_INVALID,
+    ASSISTED_ACCEPTED,
+    AUTO_HEAL_APPLIED
+}

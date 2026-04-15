@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn test-compile:*)",
+      "Bash(mvn compile:*)",
+      "Bash(mvn install:*)",
+      "Read(//c/Users/Usuario/.m2/repository/com/selfhealing/self-healing-framework/**)",
+      "Bash(wc -l /c/DEV/DevPython/healing-service/app/**/*.py)"
+    ]
+  }
+}

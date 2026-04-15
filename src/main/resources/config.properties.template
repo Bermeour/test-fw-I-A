@@ -1,0 +1,74 @@
+# =============================================================
+#  Self-Healing Framework 2.0 — Plantilla de configuración
+# =============================================================
+#
+#  INSTRUCCIONES:
+#  1. Copiar este archivo a src/test/resources/config.properties
+#     en tu proyecto consumidor.
+#  2. Rellenar los valores con los datos de tu proyecto.
+#  3. NO subir este archivo a Git si contiene contraseñas o URLs internas.
+#     Usar variables de entorno o -D en el pipeline de CI.
+#
+#  PRIORIDAD DE VALORES (de menor a mayor):
+#    1. Este archivo (valores por defecto)
+#    2. System properties:  mvn test -Dapp.url=http://staging.com
+# =============================================================
+
+
+# ── Aplicación ────────────────────────────────────────────────
+# URL base de la aplicación bajo prueba.
+app.url = http://localhost:9000
+
+# Nombre único del proyecto en el servicio de self-healing.
+# IMPORTANTE: no cambiar una vez creados los baselines — el servicio
+# perderá toda la información registrada para este proyecto.
+# Ejemplos: portal_rrhh, erp_compras, intranet_logistica
+app.project = mi_proyecto
+
+
+# ── Servicio de self-healing ──────────────────────────────────
+# URL del microservicio Python de auto-reparación de selectores.
+healing.url = http://localhost:8765
+
+# Perfil de scoring — ajusta los pesos de los motores según el tipo de app:
+#   default  → equilibrado, válido para la mayoría de apps web
+#   siebel   → prioriza jerarquía DOM (Siebel CRM, SAP, Oracle Forms)
+#   angular  → adapta scoring para apps Angular/React/Vue
+#   legacy   → apps con IDs generados dinámicamente
+healing.scoring_profile = default
+
+
+# ── Driver ────────────────────────────────────────────────────
+# Navegador: chrome | firefox | edge
+driver.browser = chrome
+
+# true en entornos CI/CD sin pantalla (headless mode)
+driver.headless = false
+
+# Timeout en segundos para esperas de elementos (untilVisible, untilClickable...)
+driver.timeout.element = 30
+
+# Timeout en segundos para carga de página completa
+driver.timeout.pageLoad = 60
+
+
+# ── Proxy (dejar vacíos si no hay proxy corporativo) ──────────
+proxy.host =
+proxy.port =
+
+
+# ── Chrome: argumentos extra (separados por comas) ────────────
+# Ejemplos:
+#   chrome.args = --window-size=1920,1080,--disable-extensions
+#   chrome.args = --incognito,--lang=es
+chrome.args =
+
+
+# ── Chrome: preferencias (chrome://settings) ──────────────────
+# Formato: chrome.pref.<clave> = <valor>
+# El tipo se infiere: "true"/"false" → Boolean, números → Integer, resto → String
+#
+# Ejemplos comunes:
+#   chrome.pref.download.default_directory = C:/descargas
+#   chrome.pref.download.prompt_for_download = false
+#   chrome.pref.plugins.always_open_pdf_externally = true
