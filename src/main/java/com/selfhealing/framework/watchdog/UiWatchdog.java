@@ -91,7 +91,7 @@ public class UiWatchdog {
                     "Se detectó alerta nativa del navegador",
                     true, null, text, Instant.now()
             );
-        } catch (NoAlertPresentException | Exception e) {
+        } catch (Exception e) {
             return null;
         }
     }
@@ -158,7 +158,8 @@ public class UiWatchdog {
                     "return null;"
             );
 
-            if (result instanceof Map<?, ?> map) {
+            if (result instanceof Map<?, ?>) {
+                Map<?, ?> map = (Map<?, ?>) result;
                 String id  = map.get("id")  == null ? null : String.valueOf(map.get("id"));
                 String cls = map.get("cls") == null ? null : String.valueOf(map.get("cls"));
                 String text = map.get("text") == null ? null : String.valueOf(map.get("text"));

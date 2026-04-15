@@ -1,10 +1,13 @@
 package com.selfhealing.framework.healing;
 
 import com.selfhealing.framework.client.ElementMeta;
+import com.selfhealing.framework.client.HealContext;
 import com.selfhealing.framework.client.HealResponse;
 import com.selfhealing.framework.client.HealingClient;
 import com.selfhealing.framework.client.HealingException;
 import com.selfhealing.framework.element.Element;
+import com.selfhealing.framework.repair.RepairRepository;
+import com.selfhealing.framework.repair.SuggestedLocator;
 import com.selfhealing.framework.waits.Waits;
 import org.openqa.selenium.*;
 
@@ -35,26 +38,41 @@ import java.util.List;
  */
 public class HealingActions {
 
-    private final WebDriver     driver;
-    private final HealingClient client;
-    private final Waits         waits;
-    private final String        project;
-    private final String        scoringProfile;
+    private final WebDriver        driver;
+    private final HealingClient    client;
+    private final Waits            waits;
+    private final String           project;
+    private final String           scoringProfile;
+    private final RepairRepository repairRepo;      // null = caché desactivado
+    private final int              cacheTtlDays;
+    private final int              cacheMinScore;
 
     /**
-     * @param driver         sesión activa de WebDriver
-     * @param client         cliente HTTP para comunicarse con el servicio
-     * @param waits          operaciones de espera compartidas
-     * @param project        nombre del proyecto en el servicio de healing
-     * @param scoringProfile perfil de scoring en minúsculas: "default" | "siebel" | "angular" | "legacy"
+     * Constructor sin caché local — siempre llama al servicio Python.
      */
     public HealingActions(WebDriver driver, HealingClient client, Waits waits,
                           String project, String scoringProfile) {
+        this(driver, client, waits, project, scoringProfile, null, 7, 80);
+    }
+
+    /**
+     * Constructor con caché local habilitado.
+     *
+     * @param repairRepo   repositorio SQLite local (puede ser null para deshabilitar caché)
+     * @param cacheTtlDays días máximos de vida de una entrada en caché
+     * @param cacheMinScore score mínimo para usar una entrada del caché
+     */
+    public HealingActions(WebDriver driver, HealingClient client, Waits waits,
+                          String project, String scoringProfile,
+                          RepairRepository repairRepo, int cacheTtlDays, int cacheMinScore) {
         this.driver         = driver;
         this.client         = client;
         this.waits          = waits;
         this.project        = project;
         this.scoringProfile = scoringProfile;
+        this.repairRepo     = repairRepo;
+        this.cacheTtlDays   = cacheTtlDays;
+        this.cacheMinScore  = cacheMinScore;
     }
 
     // ── Registro de baseline ──────────────────────────────────────────────────
@@ -144,15 +162,12 @@ public class HealingActions {
      * Intenta encontrar el elemento con el selector original. Si falla, llama al
      * servicio de healing con el DOM actual y devuelve el elemento con el selector reparado.
      *
-     * <p>Tras un healing exitoso envía {@code POST /heal/feedback} en un hilo de fondo
-     * para que el servicio aprenda del resultado.</p>
-     *
      * @param element elemento cuyo selector puede estar roto
      * @return el {@link WebElement} encontrado (con selector original o reparado)
      * @throws NoSuchElementException si el healing tampoco logra encontrar el elemento
      */
     public WebElement heal(Element element) {
-        return heal(element, "heal_" + Math.abs(element.getValue().hashCode()));
+        return heal(element, "heal_" + Math.abs(element.getValue().hashCode()), null);
     }
 
     /**
@@ -164,6 +179,32 @@ public class HealingActions {
      * @throws NoSuchElementException si el healing tampoco logra encontrar el elemento
      */
     public WebElement heal(Element element, String testId) {
+        return heal(element, testId, null);
+    }
+
+    /**
+     * Healing con filtros de contexto para afinar la búsqueda del motor DOM.
+     *
+     * <p>Usar cuando la página tiene múltiples elementos similares y el motor
+     * necesita contexto adicional para elegir el correcto.</p>
+     *
+     * <pre>{@code
+     * HealContext ctx = HealContext.create()
+     *     .anchorById("campo-monto")
+     *     .inForm("form-pago")
+     *     .excludeId("btn-cancelar-header");
+     *
+     * web.healing.heal(Element.id("btn-pagar"), "test_pago", ctx);
+     * }</pre>
+     *
+     * @param element elemento cuyo selector puede estar roto
+     * @param testId  identificador para el historial de healing del servicio
+     * @param context filtros de contexto (anchors, container, form, excludeIds).
+     *                Pasar {@code null} para comportamiento estándar.
+     * @return el {@link WebElement} encontrado
+     * @throws NoSuchElementException si el healing tampoco logra encontrar el elemento
+     */
+    public WebElement heal(Element element, String testId, HealContext context) {
         // Deshabilitar espera implícita: necesitamos que findElement falle INMEDIATAMENTE
         // para no añadir N segundos de espera extra antes de intentar el healing.
         driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(0));
@@ -171,10 +212,55 @@ public class HealingActions {
             return driver.findElement(element.toBy());
 
         } catch (NoSuchElementException original) {
-            log("Selector roto: %s — solicitando sanación [perfil=%s]...", element, scoringProfile);
+            String ctxLabel = (context != null && !context.isEmpty()) ? " [con contexto]" : "";
+            log("Selector roto: %s — solicitando sanación [perfil=%s%s]...",
+                element, scoringProfile, ctxLabel);
 
+            // ── 1. Consultar caché local ──────────────────────────────────────
+            String pageUrl = currentPageUrl();
+            if (repairRepo != null) {
+                SuggestedLocator cached = null;
+                try {
+                    cached = repairRepo.findApprovedRepair(
+                        project, pageUrl, "xpath", element.toXpath(),
+                        cacheMinScore, cacheTtlDays);
+                } catch (Exception e) {
+                    log("WARN: Error consultando caché local: %s", e.getMessage());
+                }
+
+                if (cached != null) {
+                    log("Caché local: encontrada reparación para %s → %s (score=%d)",
+                        element.getValue(), cached.getValue(), cached.getScore());
+                    try {
+                        WebElement healed = driver.findElement(cached.toBy());
+                        // Selector cacheado sigue funcionando:
+                        // 1) Actualizar times_seen en caché
+                        // 2) Revalidar con el servicio Python en background (mantiene el feedback loop)
+                        touchCacheAsync(project, pageUrl, "xpath", element.toXpath(),
+                            cached.getType(), cached.getValue());
+                        revalidateAsync(element, testId, context, pageUrl,
+                            driver.getPageSource(), cached);
+                        log("Resuelto desde caché local: %s", cached.getValue());
+                        return healed;
+
+                    } catch (NoSuchElementException stale) {
+                        // El selector cacheado ya no existe en el DOM — invalidar
+                        log("Caché inválido para %s: selector '%s' no encontrado, invalidando...",
+                            element.getValue(), cached.getValue());
+                        try {
+                            repairRepo.reject(project, pageUrl, "xpath", element.toXpath(),
+                                cached.getType(), cached.getValue(),
+                                "selector no encontrado en DOM");
+                        } catch (Exception e) {
+                            log("WARN: Error invalidando caché: %s", e.getMessage());
+                        }
+                        // caer al servicio Python
+                    }
+                }
+            }
+
+            // ── 2. Llamar al servicio Python ──────────────────────────────────
             try {
-                // La pantalla completa para /heal (CV busca el template en toda la pantalla)
                 String fullScreenshot = Base64.getEncoder()
                     .encodeToString(((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES));
 
@@ -185,7 +271,8 @@ public class HealingActions {
                     project,
                     testId,
                     fullScreenshot,
-                    scoringProfile);
+                    scoringProfile,
+                    context);
 
                 log("Respuesta del servicio: %s", response);
 
@@ -198,14 +285,16 @@ public class HealingActions {
                             response.getNewSelector(),
                             response.getStrategyUsed(),
                             response.getConfidence(),
-                            response.isFromCache() ? ", desde caché" : "");
+                            response.isFromCache() ? ", desde caché del servicio" : "");
 
-                        // Feedback positivo en background — el test no espera
+                        // Guardar en caché local para próximas ejecuciones
+                        saveToLocalCacheAsync(project, pageUrl, "xpath", element.toXpath(), response);
+
+                        // Feedback positivo al servicio en background
                         sendFeedbackAsync(response.getHealingEventId(), true, null);
                         return healed;
 
                     } else {
-                        // El servicio dijo "sanado" pero el nuevo selector tampoco funciona
                         log("WARN: El selector sanado '%s' no se encontró en el DOM",
                             response.getNewSelector());
                         sendFeedbackAsync(response.getHealingEventId(), false, null);
@@ -239,6 +328,16 @@ public class HealingActions {
     }
 
     /**
+     * Sana el selector con contexto y hace click.
+     *
+     * @param element elemento a sanar y hacer click
+     * @param context filtros de contexto para afinar la búsqueda
+     */
+    public void healAndClick(Element element, HealContext context) {
+        heal(element, "heal_" + Math.abs(element.getValue().hashCode()), context).click();
+    }
+
+    /**
      * Sana el selector, limpia el campo y escribe el texto indicado.
      *
      * @param element elemento a sanar
@@ -246,6 +345,19 @@ public class HealingActions {
      */
     public void healAndType(Element element, String text) {
         WebElement el = heal(element);
+        el.clear();
+        el.sendKeys(text);
+    }
+
+    /**
+     * Sana el selector con contexto, limpia el campo y escribe el texto indicado.
+     *
+     * @param element elemento a sanar
+     * @param text    texto a escribir en el campo
+     * @param context filtros de contexto para afinar la búsqueda
+     */
+    public void healAndType(Element element, String text, HealContext context) {
+        WebElement el = heal(element, "heal_" + Math.abs(element.getValue().hashCode()), context);
         el.clear();
         el.sendKeys(text);
     }
@@ -297,6 +409,119 @@ public class HealingActions {
             "return document.elementFromPoint(arguments[0], arguments[1]);", x, y);
 
         return (result instanceof WebElement) ? (WebElement) result : null;
+    }
+
+    // ── Caché local — operaciones asíncronas ─────────────────────────────────
+
+    /**
+     * Incrementa times_seen en caché en background — no bloquea el test.
+     */
+    private void touchCacheAsync(String app, String pageUrl,
+                                 String origType, String origValue,
+                                 String repType, String repValue) {
+        if (repairRepo == null) return;
+        Thread t = new Thread(() -> {
+            try {
+                repairRepo.touch(app, pageUrl, origType, origValue, repType, repValue);
+            } catch (Exception e) {
+                log("WARN: Error actualizando caché local: %s", e.getMessage());
+            }
+        });
+        t.setDaemon(true);
+        t.setName("SelfHealing-Cache-Touch");
+        t.start();
+    }
+
+    /**
+     * Guarda la reparación devuelta por el servicio en el caché local en background.
+     */
+    private void saveToLocalCacheAsync(String app, String pageUrl,
+                                       String origType, String origValue,
+                                       HealResponse response) {
+        if (repairRepo == null) return;
+        // Excluir coords — no son selectores almacenables
+        if ("coords".equals(response.getSelectorType())) return;
+
+        SuggestedLocator toCache = new SuggestedLocator();
+        toCache.setType(response.getSelectorType());
+        toCache.setValue(response.getNewSelector());
+        toCache.setScore((int) (response.getConfidence() * 100));
+        toCache.setReason(response.getMessage());
+
+        Thread t = new Thread(() -> {
+            try {
+                repairRepo.saveOrUpdate(app, pageUrl, origType, origValue, toCache);
+            } catch (Exception e) {
+                log("WARN: Error guardando en caché local: %s", e.getMessage());
+            }
+        });
+        t.setDaemon(true);
+        t.setName("SelfHealing-Cache-Save");
+        t.start();
+    }
+
+    /**
+     * Revalida una entrada de caché llamando al servicio Python en background.
+     *
+     * <p>Patrón stale-while-revalidate: el test usa el resultado del caché inmediatamente,
+     * pero en background se verifica con el servicio si sigue siendo la mejor opción.
+     * Si el servicio devuelve un selector diferente y mejor, se actualiza el caché.</p>
+     *
+     * <p>También garantiza que el servicio Python reciba actividad y pueda actualizar
+     * sus propias estadísticas y pesos — manteniendo el feedback loop vivo.</p>
+     */
+    private void revalidateAsync(Element element, String testId, HealContext context,
+                                 String pageUrl, String domSnapshot,
+                                 SuggestedLocator currentCached) {
+        if (repairRepo == null) return;
+
+        Thread t = new Thread(() -> {
+            try {
+                HealResponse response = client.heal(
+                    "xpath", element.toXpath(),
+                    domSnapshot,
+                    project, testId,
+                    null,           // sin screenshot — revalidación ligera
+                    scoringProfile,
+                    context);
+
+                if (response.isHealed()) {
+                    // Feedback positivo al servicio (mantiene sus estadísticas actualizadas)
+                    sendFeedbackAsync(response.getHealingEventId(), true, null);
+
+                    // Si el servicio devuelve un selector diferente y mejor, actualizar caché
+                    boolean sameSelector = currentCached.getValue().equals(response.getNewSelector())
+                        && currentCached.getType().equals(response.getSelectorType());
+                    if (!sameSelector && !"coords".equals(response.getSelectorType())) {
+                        SuggestedLocator fresh = new SuggestedLocator();
+                        fresh.setType(response.getSelectorType());
+                        fresh.setValue(response.getNewSelector());
+                        fresh.setScore((int) (response.getConfidence() * 100));
+                        fresh.setReason(response.getMessage());
+                        repairRepo.saveOrUpdate(project, pageUrl, "xpath",
+                            element.toXpath(), fresh);
+                        log("Caché actualizado por revalidación: %s → %s",
+                            currentCached.getValue(), fresh.getValue());
+                    }
+                }
+            } catch (Exception e) {
+                // La revalidación es opcional — nunca debe afectar el test
+                log("WARN: Error en revalidación background de %s: %s",
+                    element.getValue(), e.getMessage());
+            }
+        });
+        t.setDaemon(true);
+        t.setName("SelfHealing-Revalidate-" + element.getDisplayLabel());
+        t.start();
+    }
+
+    /** Captura la URL actual de forma segura (sin lanzar si el driver está en mal estado). */
+    private String currentPageUrl() {
+        try {
+            return driver.getCurrentUrl();
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     // ── Feedback asíncrono ────────────────────────────────────────────────────

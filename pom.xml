@@ -22,9 +22,11 @@
 
     <name>Self-Healing Framework</name>
     <description>
-        Framework de automatización web con auto-reparación de selectores.
-        Incluye Web facade, Actions, Waits, HealingClient, PopupGuard,
-        Assertions, Table helper y BaseTest para JUnit 5.
+        Framework de automatización web runner-agnostic con auto-reparación de selectores.
+        Incluye Web facade, HealingActions, HealContext, HealingClient, StabilityWait,
+        UiWatchdog, SiebelWaits, RepairRepository, SmartAuditRecorder, Stable Actions,
+        PopupGuard, Assertions y Table helper.
+        Compatible con JUnit 5, TestNG, Cucumber y main() puro.
     </description>
 
     <properties>
@@ -53,18 +55,17 @@
             <scope>compile</scope>
         </dependency>
 
-        <!-- ── JUnit 5 ────────────────────────────────────────────────────────
-             scope=compile (no test) porque BaseTest, ScreenshotExtension y
-             RetryExtension forman parte de la API pública del JAR y usan
-             anotaciones e interfaces de JUnit 5.
-             Los proyectos consumidores reciben JUnit como transitiva y pueden
-             sobreescribir la versión en su propio POM si lo necesitan.
+        <!-- ── JUnit 5 — opcional / provided ────────────────────────────────
+             El framework es runner-agnostic. JUnit no forma parte de la API
+             pública del JAR. El proyecto consumidor declara su propio runner
+             (JUnit 5, TestNG, Cucumber, etc.) con el scope que necesite.
+             provided = disponible al compilar el framework pero NO transitiva.
         ──────────────────────────────────────────────────────────────────── -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
-            <scope>compile</scope>
+            <scope>provided</scope>
         </dependency>
 
         <!-- ── Apache HttpClient 5 ───────────────────────────────────────────
@@ -107,6 +108,24 @@
 
     <build>
         <plugins>
+
+            <!-- ── Compilador Java 11 ────────────────────────────────────────────
+                 Declaración explícita del plugin para evitar warnings en Maven 3.9+
+                 y garantizar reproducibilidad del build.
+            ──────────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                    <encoding>UTF-8</encoding>
+                    <!-- Mostrar todos los warnings del compilador durante el build -->
+                    <showWarnings>true</showWarnings>
+                    <showDeprecation>true</showDeprecation>
+                </configuration>
+            </plugin>
 
             <!-- ── Ejecutar los tests de integración incluidos en el proyecto ──
                  Los tests de src/test/java sirven como ejemplo y validación
@@ -162,6 +181,32 @@
                         <id>attach-sources</id>
                         <goals>
                             <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ── JAR de Javadoc ────────────────────────────────────────────────
+                 Genera self-healing-framework-2.0.0-javadoc.jar.
+                 Los IDEs lo usan para mostrar la documentación en los tooltips.
+                 Instalado automáticamente junto con el JAR principal.
+            ──────────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.3</version>
+                <configuration>
+                    <encoding>UTF-8</encoding>
+                    <charset>UTF-8</charset>
+                    <docencoding>UTF-8</docencoding>
+                    <!-- Silenciar warnings de Javadoc para etiquetas HTML personalizadas -->
+                    <additionalJOption>-Xdoclint:none</additionalJOption>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
                         </goals>
                     </execution>
                 </executions>

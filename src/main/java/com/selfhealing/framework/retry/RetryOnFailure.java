@@ -8,28 +8,21 @@ import java.lang.annotation.Target;
 /**
  * Marca un test para que sea reintentado automáticamente cuando falla.
  *
- * <p>Se procesa mediante {@link com.selfhealing.base.RetryExtension}, que debe
- * estar registrada en la clase de test (o en {@code BaseTest}).</p>
+ * <p>Anotación de marcado puro — no depende de ningún runner. El runner del proyecto
+ * consumidor es responsable de detectarla y aplicar la lógica de reintento.</p>
  *
- * <p>Entre reintentos el browser se resetea: se cierran el driver y el cliente
- * de healing y se crean nuevos (equivale a ejecutar {@code @AfterEach} +
- * {@code @BeforeEach} de nuevo). Esto garantiza un estado limpio en cada intento.</p>
- *
- * <h3>Ejemplo de uso:</h3>
+ * <h3>Ejemplo de uso con JUnit 5:</h3>
  * <pre>{@code
- * // Reintentar hasta 2 veces (3 intentos en total)
- * @Test
- * @RetryOnFailure(times = 2)
- * void testOperacionFlakey() {
- *     // ...
- * }
+ * // El proyecto consumidor registra su propia extensión de retry:
+ * // @ExtendWith(MiRetryExtension.class)
  *
- * // Con valor por defecto: 1 reintento (2 intentos en total)
  * @Test
- * @RetryOnFailure
- * void testInestable() {
- *     // ...
- * }
+ * @RetryOnFailure(times = 2)   // 3 intentos en total
+ * void testOperacionFlakey() { ... }
+ *
+ * @Test
+ * @RetryOnFailure               // 2 intentos en total (valor por defecto)
+ * void testInestable() { ... }
  * }</pre>
  */
 @Retention(RetentionPolicy.RUNTIME)

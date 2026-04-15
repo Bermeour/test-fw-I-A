@@ -109,6 +109,26 @@ public class HealingClient {
     /**
      * Solicita al servicio que repare un selector roto.
      *
+     * @param selectorType    tipo del selector roto: "xpath" o "css"
+     * @param selectorValue   valor del selector que ya no funciona
+     * @param domHtml         HTML completo de la página ({@code driver.getPageSource()})
+     * @param project         nombre del proyecto en el servicio
+     * @param testId          identificador del elemento (mismo que se usó en register)
+     * @param screenshotBase64 pantalla completa en Base64 (para motor CV)
+     * @param scoringProfile  perfil de scoring: "default" | "siebel" | "angular" | "legacy"
+     * @return respuesta del servicio con el nuevo selector y el healing_event_id
+     */
+    public HealResponse heal(String selectorType, String selectorValue,
+                              String domHtml, String project, String testId,
+                              String screenshotBase64, String scoringProfile) throws IOException {
+        return heal(selectorType, selectorValue, domHtml, project, testId,
+                    screenshotBase64, scoringProfile, null);
+    }
+
+    /**
+     * Solicita al servicio que repare un selector roto, con filtros de contexto opcionales
+     * que ayudan al motor DOM a encontrar el candidato correcto cuando hay elementos similares.
+     *
      * <p>El {@code screenshotBase64} debe ser la pantalla completa (no el recorte del elemento)
      * para que el motor CV pueda buscar el template visual en toda la pantalla.</p>
      *
@@ -119,13 +139,16 @@ public class HealingClient {
      * @param testId          identificador del elemento (mismo que se usó en register)
      * @param screenshotBase64 pantalla completa en Base64 (para motor CV)
      * @param scoringProfile  perfil de scoring: "default" | "siebel" | "angular" | "legacy"
+     * @param context         filtros de contexto opcionales (anchors, container, form, excludeIds).
+     *                        Pasar {@code null} para comportamiento estándar sin filtros.
      * @return respuesta del servicio con el nuevo selector y el healing_event_id
      * @throws HealingException si el servicio devuelve 404 (sin baseline), 422 (no resuelto),
      *                          5xx (error del servidor) o hay un problema de conexión
      */
     public HealResponse heal(String selectorType, String selectorValue,
                               String domHtml, String project, String testId,
-                              String screenshotBase64, String scoringProfile) throws IOException {
+                              String screenshotBase64, String scoringProfile,
+                              HealContext context) throws IOException {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("selector_type",   selectorType);
         body.put("selector_value",  selectorValue);
@@ -135,6 +158,20 @@ public class HealingClient {
         body.put("scoring_profile", scoringProfile);
         if (screenshotBase64 != null && !screenshotBase64.isEmpty()) {
             body.put("screenshot_base64", screenshotBase64);
+        }
+
+        // Filtros de contexto — solo se envían si hay algo definido
+        if (context != null && !context.isEmpty()) {
+            if (!context.getAnchors().isEmpty())
+                body.put("anchors", context.getAnchors());
+            if (!context.getExcludeIds().isEmpty())
+                body.put("exclude_ids", context.getExcludeIds());
+            if (context.getContainerId() != null)
+                body.put("container_id", context.getContainerId());
+            if (context.getContainerClass() != null)
+                body.put("container_class", context.getContainerClass());
+            if (context.getFormId() != null)
+                body.put("form_id", context.getFormId());
         }
 
         return post("/heal", body, HealResponse.class);

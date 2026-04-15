@@ -1,6 +1,5 @@
-package com.selfhealing.base;
+package com.selfhealing.framework.waits;
 
-import com.selfhealing.framework.waits.Waits;
 import org.openqa.selenium.*;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.FluentWait;
@@ -8,15 +7,23 @@ import org.openqa.selenium.support.ui.FluentWait;
 import java.time.Duration;
 
 /**
- * Capa de interacción para páginas lentas e inestables (Siebel, SAP, Oracle).
+ * Utilidades de espera e interacción para aplicaciones lentas e inestables
+ * (Siebel, SAP, Oracle Forms).
  *
- * Responsabilidad única: manejar tiempos de carga, recargas inesperadas del DOM
- * y reintentos ante elementos que desaparecen durante la interacción.
+ * <p>No depende de ningún runner de tests (JUnit, TestNG, Cucumber).
+ * Se crea con un {@link WebDriver} y se usa directamente desde cualquier contexto:</p>
  *
- * No sabe nada de tests, JUnit, ni del servicio de healing.
- * BaseTest hereda de aquí y obtiene todos estos métodos.
+ * <pre>{@code
+ * // Con Web.init()
+ * Web web = Web.init(config);
+ * SiebelWaits siebel = new SiebelWaits(web.driver);
+ *
+ * siebel.waitForPageReady();
+ * siebel.safeClick("//button[@id='aceptar']");
+ * siebel.safeSendKeys("//input[@name='monto']", "1000");
+ * }</pre>
  */
-public abstract class SiebelWaits {
+public class SiebelWaits {
 
     // Timeout generoso para apps Siebel (lentas por naturaleza)
     private static final int PAGE_READY_TIMEOUT_SEC = 60;
@@ -24,8 +31,15 @@ public abstract class SiebelWaits {
     private static final int POLL_MS                = 500;
     private static final int MAX_RETRIES            = 3;
 
-    // El driver lo inicializa BaseTest en @BeforeEach
-    protected WebDriver driver;
+    /** XPath genérico de spinner/overlay de carga — ajustar si el spinner es diferente. */
+    public static final String SPINNER_XPATH =
+        "//*[contains(@class,'spinner') or contains(@class,'loading') or contains(@class,'loader')]";
+
+    private final WebDriver driver;
+
+    public SiebelWaits(WebDriver driver) {
+        this.driver = driver;
+    }
 
     // -------------------------------------------------------------------------
     // Esperar que la página esté realmente lista
@@ -35,7 +49,7 @@ public abstract class SiebelWaits {
     // Esperamos 3 cosas: readyState, AJAX inactivo, y spinner desaparecido.
     // -------------------------------------------------------------------------
 
-    protected void waitForPageReady() {
+    public void waitForPageReady() {
         waitForDocumentReady();
         waitForAjaxIdle();
         waitForSpinnerGone();
@@ -57,15 +71,13 @@ public abstract class SiebelWaits {
     }
 
     private void waitForSpinnerGone() {
-        // XPath genérico para spinners/overlays de carga comunes en Siebel/SAP
-        // Ajusta el selector al spinner específico de tu app si es necesario
         try {
             fluent(30)
                 .ignoring(NoSuchElementException.class)
                 .until(ExpectedConditions.invisibilityOfElementLocated(
-                    By.xpath(Waits.SPINNER_XPATH)));
+                    By.xpath(SPINNER_XPATH)));
         } catch (TimeoutException e) {
-            // Si el spinner no existía, no pasa nada
+            // Si el spinner no existía no pasa nada
         }
     }
 
@@ -79,7 +91,7 @@ public abstract class SiebelWaits {
     // y recrear el elemento mientras esperamos.
     // -------------------------------------------------------------------------
 
-    protected WebElement waitReady(String xpath) {
+    public WebElement waitReady(String xpath) {
         return fluent(ELEMENT_TIMEOUT_SEC)
             .ignoring(NoSuchElementException.class)
             .ignoring(StaleElementReferenceException.class)
@@ -98,20 +110,19 @@ public abstract class SiebelWaits {
     // Solución: reintentar hasta MAX_RETRIES veces.
     // -------------------------------------------------------------------------
 
-    protected void safeClick(String xpath) {
+    public void safeClick(String xpath) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 waitForPageReady();
                 waitReady(xpath).click();
-                waitForPageReady(); // esperar que termine la recarga provocada por el click
+                waitForPageReady();
                 return;
             } catch (StaleElementReferenceException e) {
-                System.out.printf("[safeClick] DOM reconstruido, reintento %d/%d — %s%n",
+                System.out.printf("[SiebelWaits] DOM reconstruido, reintento %d/%d — %s%n",
                     attempt, MAX_RETRIES, xpath);
                 if (attempt == MAX_RETRIES) throw e;
             } catch (ElementClickInterceptedException e) {
-                // Otro elemento está tapando el botón (típico en Siebel con overlays)
-                System.out.printf("[safeClick] Click interceptado, reintento %d/%d — %s%n",
+                System.out.printf("[SiebelWaits] Click interceptado, reintento %d/%d — %s%n",
                     attempt, MAX_RETRIES, xpath);
                 waitForSpinnerGone();
                 if (attempt == MAX_RETRIES) throw e;
@@ -127,7 +138,7 @@ public abstract class SiebelWaits {
     // Verificamos que el valor quedó escrito; si no, reintentamos.
     // -------------------------------------------------------------------------
 
-    protected void safeSendKeys(String xpath, String value) {
+    public void safeSendKeys(String xpath, String value) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 waitForPageReady();
@@ -135,29 +146,28 @@ public abstract class SiebelWaits {
                 el.clear();
                 el.sendKeys(value);
 
-                // Verificar que el valor realmente quedó en el campo
                 String actual = el.getAttribute("value");
                 if (value.equals(actual)) return;
 
-                System.out.printf("[safeSendKeys] Valor no persistió ('%s' esperado, '%s' actual), reintento %d/%d%n",
+                System.out.printf("[SiebelWaits] Valor no persistió ('%s' esperado, '%s' actual), reintento %d/%d%n",
                     value, actual, attempt, MAX_RETRIES);
 
             } catch (StaleElementReferenceException e) {
-                System.out.printf("[safeSendKeys] DOM reconstruido, reintento %d/%d — %s%n",
+                System.out.printf("[SiebelWaits] DOM reconstruido, reintento %d/%d — %s%n",
                     attempt, MAX_RETRIES, xpath);
                 if (attempt == MAX_RETRIES) throw e;
             }
         }
-        throw new RuntimeException(
-            String.format("[safeSendKeys] No se pudo escribir '%s' en '%s' tras %d intentos",
-                value, xpath, MAX_RETRIES));
+        throw new RuntimeException(String.format(
+            "[SiebelWaits] No se pudo escribir '%s' en '%s' tras %d intentos",
+            value, xpath, MAX_RETRIES));
     }
 
     // -------------------------------------------------------------------------
     // Esperar que un elemento desaparezca (útil tras cerrar diálogos en Siebel)
     // -------------------------------------------------------------------------
 
-    protected void waitGone(String xpath) {
+    public void waitGone(String xpath) {
         fluent(ELEMENT_TIMEOUT_SEC)
             .ignoring(StaleElementReferenceException.class)
             .until(ExpectedConditions.invisibilityOfElementLocated(By.xpath(xpath)));

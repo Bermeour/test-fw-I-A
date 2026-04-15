@@ -1,31 +1,37 @@
-# Framework de Automatización Web con Self-Healing
+# Self-Healing Framework
 
 Framework Java sobre Selenium 4 con auto-reparación de selectores, acciones robustas,
-assertions fluidas, manejo de popups y ejecución paralela.
+esperas inteligentes, assertions fluidas, manejo de popups y caché local de reparaciones.
 
-> Versión actual: **2.0.0** | Java 11+ | Selenium 4.20 | JUnit 5.10 | Maven 3.6+
+> **Versión:** 2.0.0 | **Java:** 11+ | **Selenium:** 4.20 | **Maven:** 3.6+
+
+**Runner-agnostic** — el framework no depende de JUnit, TestNG ni Cucumber.
+El proyecto consumidor elige su runner y gestiona el ciclo de vida con `Web.init()` / `web.close()`.
 
 ---
 
 ## Índice
 
 1. [Requisitos previos](#1-requisitos-previos)
-2. [Onboarding — nuevo proyecto en 5 minutos](#2-onboarding--nuevo-proyecto-en-5-minutos)
-3. [Configuración completa](#3-configuración-completa)
-4. [Elementos](#4-elementos)
-5. [Acciones](#5-acciones)
-6. [Esperas](#6-esperas)
-7. [Self-Healing — guía completa](#7-self-healing--guía-completa)
-8. [Assertions](#8-assertions)
-9. [Tablas](#9-tablas)
-10. [PopupGuard](#10-popupguard)
-11. [Cookies y Storage](#11-cookies-y-storage)
-12. [Ejecución paralela](#12-ejecución-paralela)
-13. [Retry automático](#13-retry-automático)
-14. [BaseTest — clase base para tests](#14-basetest--clase-base-para-tests)
-15. [Patrones recomendados](#15-patrones-recomendados)
-16. [Preguntas frecuentes y troubleshooting](#16-preguntas-frecuentes-y-troubleshooting)
-17. [Referencia rápida de la API](#17-referencia-rápida-de-la-api)
+2. [Dependencia Maven](#2-dependencia-maven)
+3. [Inicio rápido](#3-inicio-rápido)
+4. [Configuración](#4-configuración)
+5. [Elementos](#5-elementos)
+6. [Acciones](#6-acciones)
+7. [Stable Actions — acciones robustas](#7-stable-actions--acciones-robustas)
+8. [Esperas](#8-esperas)
+9. [Self-Healing — guía completa](#9-self-healing--guía-completa)
+10. [HealContext — filtros de contexto](#10-healcontext--filtros-de-contexto)
+11. [RepairRepository — caché local](#11-repairrepository--caché-local)
+12. [SmartAuditRecorder — trazabilidad](#12-smartauditrecorder--trazabilidad)
+13. [SiebelWaits — apps lentas](#13-siebelwaits--apps-lentas)
+14. [UiWatchdog + StabilityWait](#14-uiwatchdog--stabilitywait)
+15. [Assertions](#15-assertions)
+16. [Tablas](#16-tablas)
+17. [PopupGuard](#17-popupguard)
+18. [Cookies y Storage](#18-cookies-y-storage)
+19. [Integración con runners](#19-integración-con-runners)
+20. [Referencia rápida de la API](#20-referencia-rápida-de-la-api)
 
 ---
 
@@ -35,164 +41,177 @@ assertions fluidas, manejo de popups y ejecución paralela.
 |---|---|---|
 | Java | 11 | Compatible con 17 y 21 |
 | Maven | 3.6 | |
-| Chrome | Cualquier reciente | Selenium Manager descarga ChromeDriver automáticamente |
-| Servicio self-healing | corriendo en `localhost:8765` | Ver sección 7 |
+| Chrome / Firefox / Edge | Cualquier reciente | Selenium Manager descarga el driver automáticamente |
+| Servicio self-healing | corriendo en `localhost:8765` | Microservicio Python independiente |
 
-El framework **no requiere instalar ChromeDriver manualmente** — Selenium 4 lo gestiona.
+El framework **no requiere instalar ChromeDriver manualmente**.
 
 ---
 
-## 2. Onboarding — nuevo proyecto en 5 minutos
+## 2. Dependencia Maven
 
-### Paso 1 — Copiar la configuración base
+```xml
+<dependency>
+    <groupId>com.selfhealing</groupId>
+    <artifactId>self-healing-framework</artifactId>
+    <version>2.0.0</version>
+</dependency>
+```
 
-Editar `src/test/resources/config.properties` con los datos de tu proyecto:
+El framework **no arrastra JUnit como dependencia transitiva**. Declara tu runner por separado:
+
+```xml
+<!-- JUnit 5 -->
+<dependency>
+    <groupId>org.junit.jupiter</groupId>
+    <artifactId>junit-jupiter</artifactId>
+    <version>5.10.2</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- TestNG -->
+<dependency>
+    <groupId>org.testng</groupId>
+    <artifactId>testng</artifactId>
+    <version>7.9.0</version>
+    <scope>test</scope>
+</dependency>
+```
+
+---
+
+## 3. Inicio rápido
+
+### Con `config.properties`
 
 ```properties
-app.url     = http://mi-aplicacion.empresa.com
-app.project = nombre_proyecto          # único por proyecto, sin espacios
+# src/test/resources/config.properties
+app.url     = http://mi-aplicacion.com
+app.project = portal_rrhh
 healing.url = http://localhost:8765
-healing.scoring_profile = default      # ver sección 7.3
 driver.browser  = chrome
 driver.headless = false
 driver.timeout.element  = 30
 driver.timeout.pageLoad = 60
 ```
 
-> **Importante:** `app.project` identifica tu proyecto en la base de datos del servicio de
-> self-healing. Usa un nombre descriptivo y único entre los 45 proyectos (ej: `portal_rrhh`,
-> `erp_compras`, `intranet_logistica`). **No lo cambies una vez creados los baselines** — si lo
-> cambias, el servicio perderá todos los baselines registrados para ese proyecto.
-
-### Paso 2 — Crear la primera clase de test
-
 ```java
-@DisplayName("Login — Portal RRHH")
-class TestLogin extends BaseTest {
+// JUnit 5
+class LoginTest {
+    Web web;
 
-    // Declarar elementos una vez, reutilizarlos en todos los métodos
-    private static final Element USUARIO  = Element.id("input-username").label("Campo usuario");
-    private static final Element PASSWORD = Element.id("input-password").label("Campo contraseña");
-    private static final Element BTN_LOGIN = Element.id("btn-login").label("Botón login");
-    private static final Element RESULTADO = Element.id("login-result").label("Resultado login");
+    @BeforeEach
+    void setUp() { web = Web.init(ConfigLoader.webConfig()); }
+
+    @AfterEach
+    void tearDown() { web.close(); }
 
     @Test
-    @DisplayName("Login exitoso con credenciales válidas")
-    void testLoginExitoso() {
-        web.actions.type(USUARIO,   "admin");
-        web.actions.type(PASSWORD,  "secreto");
-        web.actions.click(BTN_LOGIN);
-
-        web.assertThat(RESULTADO)
-           .isVisible()
-           .containsText("Bienvenido");
+    void loginExitoso() {
+        web.actions.type(Element.id("username").label("Usuario"), "admin");
+        web.actions.type(Element.id("password").label("Contraseña"), "secret");
+        web.actions.click(Element.id("btn-login").label("Login"));
+        web.assertThat(Element.id("dashboard")).isVisible();
     }
 }
 ```
 
-### Paso 3 — Ejecutar
+### Sin runner — `main()` puro
 
-```bash
-# Ejecución normal
-mvn test
-
-# Apuntar a otro entorno sin tocar config.properties
-mvn test -Dapp.url=http://staging.empresa.com -Ddriver.headless=true
-
-# Solo una clase de test
-mvn test -Dtest=TestLogin
-
-# Solo un método
-mvn test -Dtest=TestLogin#testLoginExitoso
+```java
+public class Main {
+    public static void main(String[] args) {
+        Web web = Web.init("http://mi-app.com", "mi-proyecto");
+        try {
+            web.actions.type(Element.id("username"), "admin");
+            web.actions.click(Element.id("btn-login"));
+            web.waits.untilVisible(Element.id("dashboard"));
+        } finally {
+            web.close();
+        }
+    }
+}
 ```
 
 ---
 
-## 3. Configuración completa
+## 4. Configuración
 
-### `config.properties` — referencia de todas las claves
+### `config.properties` — referencia completa
 
 ```properties
-# ── Aplicación ────────────────────────────────────────────────
+# ── Aplicación ─────────────────────────────────────────────────
 app.url     = http://localhost:9000
-app.project = mi_proyecto           # identificador único en el servicio de healing
+app.project = mi_proyecto       # único por proyecto, no cambiar tras crear baselines
 
-# ── Servicio de self-healing ──────────────────────────────────
+# ── Servicio de self-healing ────────────────────────────────────
 healing.url             = http://localhost:8765
-# Perfil de scoring — ajusta los pesos de los motores según el tipo de app:
-#   default  → equilibrado, válido para la mayoría de apps web
-#   siebel   → prioriza jerarquía DOM (Siebel CRM, SAP, Oracle Forms)
-#   angular  → adapta scoring para apps Angular/React/Vue
-#   legacy   → apps con IDs dinámicos o generados automáticamente
+# default | siebel | angular | legacy
 healing.scoring_profile = default
 
-# ── Driver ────────────────────────────────────────────────────
-driver.browser  = chrome            # chrome | firefox | edge
-driver.headless = false             # true en CI/CD
-driver.timeout.element  = 30       # segundos para esperas de elementos
-driver.timeout.pageLoad = 60       # segundos para carga de página
+# ── Driver ─────────────────────────────────────────────────────
+driver.browser  = chrome        # chrome | firefox | edge
+driver.headless = false         # true en CI/CD
+driver.timeout.element  = 30
+driver.timeout.pageLoad = 60
 
-# ── Proxy (dejar vacíos si no hay proxy) ──────────────────────
+# ── Proxy (dejar vacíos si no hay proxy) ───────────────────────
 proxy.host =
 proxy.port =
 
-# ── Chrome: argumentos extra (separados por comas) ────────────
-chrome.args =
-# Ejemplos:
-#   chrome.args = --window-size=1920,1080,--disable-extensions
-#   chrome.args = --incognito,--lang=es
+# ── Chrome: argumentos extra ────────────────────────────────────
+# chrome.args = --window-size=1920,1080,--disable-extensions
 
-# ── Chrome: preferencias (chrome://settings) ──────────────────
+# ── Chrome: preferencias ────────────────────────────────────────
 # chrome.pref.download.default_directory = C:/descargas
 # chrome.pref.download.prompt_for_download = false
-# chrome.pref.plugins.always_open_pdf_externally = true
 ```
 
-### Sobreescrituras por entorno en CI/CD
-
-```bash
-# Sin tocar config.properties, desde el pipeline:
-mvn test \
-  -Dapp.url=http://staging.empresa.com \
-  -Dapp.project=portal_rrhh \
-  -Ddriver.headless=true \
-  -Ddriver.browser=edge \
-  -Dhealing.scoring_profile=angular
-```
-
-### Configuración programática con `WebConfig`
-
-Para casos avanzados que necesiten opciones no disponibles en `config.properties`:
+### `WebConfig` builder — configuración programática
 
 ```java
 WebConfig config = WebConfig.builder()
     .url("http://mi-app.com")
     .project("portal_rrhh")
-    .browser(WebConfig.Browser.CHROME)
+    .browser(WebConfig.Browser.CHROME)         // CHROME | FIREFOX | EDGE
     .headless(true)
     .timeoutSeconds(45)
     .pageLoadTimeoutSeconds(90)
-    .scoringProfile(WebConfig.ScoringProfile.ANGULAR)
+    .scoringProfile(WebConfig.ScoringProfile.ANGULAR)  // DEFAULT|SIEBEL|ANGULAR|LEGACY
+    .healingUrl("http://localhost:8765")
     .proxy("proxy.empresa.com", 8080)
     .chromeArg("--window-size=1920,1080")
     .chromeArg("--disable-extensions")
     .chromePref("download.default_directory", "C:/descargas")
     .chromePref("download.prompt_for_download", false)
     .customizeChrome(opts -> {
-        // Escape hatch: opciones avanzadas no cubiertas por el builder
+        // Escape hatch: opciones avanzadas aplicadas al final
         opts.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
+        opts.setExperimentalOption("useAutomationExtension", false);
+    })
+    .customizeFirefox(opts -> {
+        opts.addPreference("browser.download.folderList", 2);
     })
     .build();
 
 Web web = Web.init(config);
 ```
 
+### Sobreescrituras en CI/CD
+
+```bash
+mvn test \
+  -Dapp.url=http://staging.empresa.com \
+  -Dapp.project=portal_rrhh \
+  -Ddriver.headless=true \
+  -Dhealing.scoring_profile=angular
+```
+
 ---
 
-## 4. Elementos
+## 5. Elementos
 
-`Element` describe un localizador. Se declara una vez como constante y se reutiliza en todos
-los métodos del test.
+`Element` describe un localizador. Se declara una vez y se reutiliza en todos los métodos.
 
 ```java
 // Tipos de localizador
@@ -200,858 +219,792 @@ Element.id("btn-login")
 Element.xpath("//button[@id='btn-login']")
 Element.css(".modal .btn-primary")
 Element.name("username")
-Element.text("Iniciar sesión")        // busca por texto visible exacto
+Element.text("Iniciar sesión")             // por texto visible exacto
 
-// Etiqueta legible — aparece en logs y mensajes de error en lugar del selector técnico
-Element campo = Element.id("input-username").label("Campo usuario");
-// Logs: "[14:32:01] STEP  type → Campo usuario = 'admin'"
-// Error: "isVisible(Campo usuario): el elemento no existe en el DOM"
+// Etiqueta legible — aparece en logs y mensajes de error
+Element boton = Element.id("btn-login").label("Botón Login");
+// Log: "[STEP] click → Botón Login"
+// Error: "isVisible(Botón Login): elemento no encontrado"
 ```
 
-**Buena práctica** — declarar los elementos como constantes estáticas en la clase de test o
-en una clase de Page Object, nunca inline en cada método:
+**Buena práctica:**
 
 ```java
-// ✅ Correcto — declarado una vez, legible y reutilizable
-private static final Element BTN_GUARDAR = Element.id("btn-save").label("Botón Guardar");
+// ✅ Constante estática, etiquetada, reutilizable
+private static final Element BTN_GUARDAR = Element.id("btn-save").label("Guardar");
 
-// ❌ Incorrecto — duplicado en cada método, sin etiqueta
+// ❌ Inline sin etiqueta — difícil de mantener
 driver.findElement(By.id("btn-save")).click();
 ```
 
 ---
 
-## 5. Acciones
-
-### Escritura
+## 6. Acciones
 
 ```java
-web.actions.type(campo, "admin");             // limpiar + escribir + verificar que persistió
-web.actions.append(campo, " apellido");       // añadir sin limpiar (autocomplete)
-web.actions.typeSlow(campo, "admin", 80);     // 80ms entre teclas (validación live)
-web.actions.typeJS(campo, "valor");           // vía JS — campos protegidos o custom
+// ── Escritura ──────────────────────────────────────────────────
+web.actions.type(campo, "admin");             // limpiar + escribir
+web.actions.append(campo, " apellido");       // añadir sin limpiar
+web.actions.typeSlow(campo, "admin", 80);     // 80ms entre teclas (autocomplete)
+web.actions.typeJS(campo, "valor");           // vía JavaScript
 web.actions.clear(campo);
 web.actions.pressKey(campo, Keys.ENTER);
-web.actions.pressKey(campo, Keys.chord(Keys.CONTROL, "a")); // Ctrl+A
-```
 
-> **`typeSlow`** — úsalo cuando el campo tiene autocompletado o validación que se dispara
-> con cada tecla y no responde a `sendKeys` normal (Siebel, SAP, apps Angular con `(input)`).
-
-### Clicks
-
-```java
+// ── Clicks ─────────────────────────────────────────────────────
 web.actions.click(boton);
-web.actions.clickJS(boton);           // vía JS — evita overlays y elementos fuera del viewport
+web.actions.clickJS(boton);                   // vía JS — evita overlays
 web.actions.doubleClick(elemento);
 web.actions.rightClick(elemento);
-web.actions.clickAt(canvas, 120, 45); // coordenadas relativas al elemento
-web.actions.clickByKeyboard(boton);   // foco + ENTER (accesibilidad / Siebel)
-```
 
-### Llenado masivo de formularios
+// ── Selects ────────────────────────────────────────────────────
+web.actions.select.byText(pais, "Colombia");
+web.actions.select.byValue(pais, "CO");
+web.actions.select.byIndex(pais, 0);
 
-```java
-// LinkedHashMap garantiza el orden si hay campos que validan al perder el foco
+// ── Lectura ────────────────────────────────────────────────────
+String texto  = web.actions.read(elemento);
+String valor  = web.actions.readValue(inputField);
+boolean vis   = web.actions.isVisible(elemento);
+boolean act   = web.actions.isEnabled(boton);
+
+// ── Scroll ─────────────────────────────────────────────────────
+web.actions.scroll.toElement(elemento);
+web.actions.scroll.toTop();
+web.actions.scroll.toBottom();
+
+// ── Visual (depuración) ────────────────────────────────────────
+web.actions.visual.highlight(elemento);
+web.actions.visual.blink(elemento, 3);
+
+// ── Formularios ────────────────────────────────────────────────
 Map<Element, String> campos = new LinkedHashMap<>();
 campos.put(nombre,   "Juan García");
 campos.put(email,    "juan@empresa.com");
 campos.put(telefono, "600123456");
-campos.put(empresa,  "ACME S.L.");
-
 web.actions.fillForm(campos);
-web.actions.click(guardar);
-```
 
-### Lectura de valores
-
-```java
-String texto  = web.actions.read(elemento);               // innerText
-String valor  = web.actions.readValue(inputField);        // atributo value
-String href   = web.actions.readAttribute(enlace, "href");
-boolean ok    = web.actions.isVisible(elemento);
-boolean activo = web.actions.isEnabled(boton);
-boolean marcado = web.actions.isSelected(checkbox);
-```
-
-### Sub-namespaces de acciones
-
-```java
-web.actions.scroll.toElement(tablaGrande);
-web.actions.scroll.toTop();
-web.actions.scroll.toBottom();
-web.actions.scroll.byPixels(0, 500);
-
-web.actions.visual.highlight(elemento);      // borde rojo para depuración
-web.actions.visual.blink(elemento, 3);       // parpadea N veces
-web.actions.visual.screenshot("paso-1");     // guarda screenshot en disco
-
-web.actions.select.byText(pais, "Colombia");
-web.actions.select.byValue(pais, "CO");
-web.actions.select.byIndex(pais, 2);
-
+// ── Drag & Drop ────────────────────────────────────────────────
 web.actions.drag.dragAndDrop(tarjeta, columna);
 
-web.actions.alert.readAndAccept();           // leer texto y aceptar
+// ── Alertas ────────────────────────────────────────────────────
+web.actions.alert.readAndAccept();
 web.actions.alert.dismiss();
-web.actions.alert.typeAndAccept("texto");    // para prompt
+web.actions.alert.typeAndAccept("texto");
 
-web.actions.navigate.back();
-web.actions.navigate.refresh();
-web.actions.navigate.openNewTab("http://otra-url.com");
-web.actions.navigate.switchToFrame(Element.id("frame-contenido"));
-web.actions.navigate.switchToDefaultContent();
+// ── API fluida encadenable ─────────────────────────────────────
+web.actions.type(campo, "admin").border();            // escribir + resaltar
+web.actions.click(boton).scroll().blink(2);           // click + scroll + parpadeo
+String texto2 = web.actions.click(elem).scroll().read(); // click + scroll + leer
 ```
 
 ---
 
-## 6. Esperas
+## 7. Stable Actions — acciones robustas
 
-Todas usan `FluentWait` internamente — nunca bloquean más de lo necesario y toleran DOM inestable.
+Las **Stable Actions** integran `StabilityWait` + `UiWatchdog` + reintentos automáticos.
+Son independientes del framework `Web` y se pueden usar en cualquier contexto.
 
 ```java
-web.waits.untilPageReady();                          // readyState + AJAX idle + spinner
-web.waits.untilVisible(Element.id("resultado"));
-web.waits.untilClickable(Element.id("btn-enviar"));  // visible + enabled
-web.waits.untilGone(Element.css(".loading-overlay"));
-web.waits.untilTextPresent(Element.id("estado"), "Procesado");
-web.waits.sleep(2);                                  // pausa fija — último recurso
+// Instanciación standalone — solo necesitan un WebDriver
+ClickActions  clicks  = new ClickActions(driver);
+WriteActions  writes  = new WriteActions(driver);
+ReadActions   reads   = new ReadActions(driver);
+ScrollActions scrolls = new ScrollActions(driver);
+SelectActions selects = new SelectActions(driver);
+VisualActions visuals = new VisualActions(driver);
 ```
 
-**`untilPageReady`** — comprueba tres condiciones en secuencia:
-1. `document.readyState === 'complete'`
-2. Cola AJAX de jQuery vacía (se ignora si no hay jQuery)
-3. Spinners/overlays desaparecidos (`loading`, `busy`, `spinner`, `loadingPanel`)
+```java
+// ── ClickActions ───────────────────────────────────────────────
+clicks.click(By.id("btn-submit"));
+clicks.click(webElement);
+clicks.doubleClick(By.xpath("//tr[1]"));
+clicks.jsClick(By.id("btn-oculto"));       // fallback JS automático si click falla
 
-Fundamental para Siebel, SAP u Oracle Forms que reportan `readyState=complete` mientras aún
-procesan internamente.
+// ── WriteActions ───────────────────────────────────────────────
+writes.write(By.id("campo"), "valor");
+writes.clear(By.id("campo"));
+writes.append(By.id("campo"), " texto adicional");
+writes.pressEnter(By.id("campo"));
+writes.pressTab(By.id("campo"));
+
+// ── ReadActions ────────────────────────────────────────────────
+String texto   = reads.text(By.id("label"));
+String valor   = reads.attribute(By.id("input"), "value");
+boolean vis    = reads.isVisible(By.id("panel"));
+boolean existe = reads.exists(By.id("error-msg"));
+
+// ── SelectActions ──────────────────────────────────────────────
+selects.selectByText(By.id("combo"), "Opción A");
+selects.selectByValue(By.id("combo"), "OPT_A");
+selects.selectByIndex(By.id("combo"), 0);
+String seleccion = selects.getSelectedText(By.id("combo"));
+```
+
+**Comportamiento ante errores:**
+
+| Excepción | Comportamiento |
+|---|---|
+| `ElementClickInterceptedException` | Watchdog detecta el overlay → fallback JS |
+| `InvalidElementStateException` | Watchdog revisa el estado → reintento |
+| `StaleElementReferenceException` | Reintento automático transparente |
 
 ---
 
-## 7. Self-Healing — guía completa
-
-El servicio de self-healing repara selectores rotos automáticamente cuando cambian tras un
-deploy. Usa tres motores: análisis de DOM, visión por computadora (CV) e historial de
-sanaciones anteriores.
-
-### 7.1 Cómo funciona internamente
-
-```
-findElement(selector)
-  │
-  ├─ Selector funciona → devuelve el elemento (flujo normal)
-  │
-  └─ NoSuchElementException
-        │
-        ├─ Captura: driver.getPageSource() → DOM completo
-        ├─ Captura: screenshot PANTALLA COMPLETA → motor CV
-        ├─ POST /heal al servicio
-        │     ├─ 404 → sin baseline → el test falla con el error original
-        │     ├─ 422 → ningún motor encontró el elemento → el test falla
-        │     ├─ 5xx/timeout → reintentar 3 veces (500ms→1s→2s) → el test falla
-        │     └─ 200 healed=true
-        │           ├─ selector_type="xpath" → findElement(By.xpath(newSelector))
-        │           ├─ selector_type="coords" → document.elementFromPoint(x, y)
-        │           ├─ Elemento encontrado → POST /heal/feedback(correct=true) en background
-        │           │                      → retorna el elemento
-        │           └─ Elemento no encontrado → POST /heal/feedback(correct=false) en background
-        │                                     → el test falla con el error original
-        └─ En todos los casos de fallo: relanza la excepción original de Selenium
-```
-
-### 7.2 Registrar baselines
-
-El baseline es la "foto" del elemento cuando su selector funciona. El servicio lo usa como
-referencia para encontrar el elemento después de que el selector cambie.
+## 8. Esperas
 
 ```java
-// En @BeforeEach — registrar cuando la app está en estado conocido
-@BeforeEach
-void registrarBaselines() {
-    web.healing.register(Element.id("btn-login"),       "login_btn");
-    web.healing.register(Element.id("input-username"),  "login_username");
-    web.healing.register(Element.id("input-password"),  "login_password");
-}
+// Esperas básicas
+web.waits.untilVisible(elemento);
+web.waits.untilInvisible(elemento);
+web.waits.untilClickable(elemento);
+web.waits.untilText(elemento, "Bienvenido");
+web.waits.untilPageReady();               // readyState + jQuery.active
+
+// Con timeout explícito
+web.waits.untilVisible(elemento, Duration.ofSeconds(15));
+
+// FluentWait personalizado
+new FluentWait<>(web.driver)
+    .withTimeout(Duration.ofSeconds(20))
+    .pollingEvery(Duration.ofMillis(300))
+    .ignoring(NoSuchElementException.class)
+    .until(d -> d.findElement(By.id("resultado")).isDisplayed());
 ```
 
-**Qué envía el cliente al registrar:**
-- `selector_value` — el selector que funciona hoy
-- `element_meta` — tag, id, texto, clases CSS, aria-label, placeholder, tipo, rol, data-testid,
-  tag del padre, número de hermanos
-- `screenshot_base64` — **recorte del elemento** (no pantalla completa). Selenium 4 lo genera
-  con `element.getScreenshotAs()`. El motor CV lo usa como template para template-matching.
+---
 
-> **Por qué el recorte y no la pantalla completa en register:**
-> El motor CV guarda el recorte como template. Cuando el selector falla, busca ese template
-> en la pantalla completa. Si mandas pantalla completa en el register, el template-matching
-> pierde precisión porque el "template" incluye todo el contexto de la página.
+## 9. Self-Healing — guía completa
 
-### 7.3 Perfiles de scoring
+### Flujo de registro y sanación
 
-El perfil controla cómo el servicio pondera cada motor al buscar el elemento:
+```
+1. register()  → guardar baseline cuando el selector funciona
+2. DOM cambia  → el selector original ya no existe
+3. heal()      → servicio localiza el elemento y devuelve selector reparado
+4. feedback    → el cliente informa si el elemento fue encontrado (en background)
+```
+
+### 9.1 Registrar baseline
+
+```java
+// Con testId automático derivado del label del elemento
+web.healing.register(Element.id("btn-login").label("Botón Login"));
+
+// Con testId explícito (recomendado — más estable entre ejecuciones)
+web.healing.register(Element.id("btn-login"), "TC_001_btn_login");
+```
+
+El baseline incluye: tag, id, texto, clases, atributos ARIA, contexto del padre y screenshot del elemento.
+
+### 9.2 Sanar un selector roto
+
+```java
+// Heal básico — devuelve el WebElement encontrado (original o reparado)
+WebElement el = web.healing.heal(Element.id("btn-login"));
+
+// Con testId explícito
+WebElement el = web.healing.heal(Element.id("btn-login"), "TC_001_btn_login");
+
+// Sanar y hacer click
+web.healing.healAndClick(Element.id("btn-login"));
+
+// Sanar y escribir
+web.healing.healAndType(Element.id("campo-usuario"), "admin");
+```
+
+### 9.3 Perfiles de scoring
 
 | Perfil | Cuándo usarlo |
 |---|---|
-| `default` | Apps web estándar (la mayoría de proyectos) |
-| `siebel` | Siebel CRM, SAP WebGUI, Oracle Forms — DOM con jerarquía profunda y IDs dinámicos largos |
-| `angular` | Apps Angular, React, Vue — componentes con bindings y atributos generados |
-| `legacy` | Apps legacy con IDs generados dinámicamente (ej: `id="ctrl0x3A2F"`) |
+| `DEFAULT` | La mayoría de apps web |
+| `SIEBEL` | Siebel CRM, SAP, Oracle Forms — prioriza jerarquía DOM |
+| `ANGULAR` | Apps Angular, React, Vue — adapta el scoring para componentes |
+| `LEGACY` | Apps con IDs dinámicos o generados automáticamente |
 
-Configurar en `config.properties`:
 ```properties
 healing.scoring_profile = siebel
 ```
 
-O por proyecto al crear el `Web`:
+### 9.4 Motores de healing
+
+El servicio ejecuta dos motores en paralelo:
+
+- **Motor DOM** — analiza atributos, texto, clases, jerarquía y proximidad. Devuelve XPath.
+- **Motor CV** — template matching con OpenCV sobre el screenshot. Devuelve `coords::x,y`.
+
+El selector `coords::x,y` se resuelve automáticamente con `document.elementFromPoint(x, y)`.
+
+### 9.5 HealingClient directo
+
 ```java
-WebConfig.builder()
-    .scoringProfile(WebConfig.ScoringProfile.SIEBEL)
-    .build();
+HealingClient client = new HealingClient("http://localhost:8765");
+
+// Monitorización
+Map<String, Object> health  = client.getHealth();
+Map<String, Object> metrics = client.getMetrics("mi_proyecto");
+Map<String, Object> history = client.getHistory("mi_proyecto", 10);
+
+client.close();
 ```
 
-### 7.4 Usar el healing en un test
+---
+
+## 10. HealContext — filtros de contexto
+
+`HealContext` permite afinar la búsqueda del motor DOM cuando la página tiene
+múltiples elementos similares. Todos los filtros son opcionales e independientes.
 
 ```java
-// Cuando el selector puede haberse roto tras un deploy
-WebElement boton = web.healing.heal(
-    Element.id("btn-login-ROTO"),  // selector que ya no funciona
-    "login_btn"                    // testId del baseline registrado
-);
-boton.click();
+HealContext ctx = HealContext.create()
+    .anchorById("campo-monto")          // priorizar candidatos cerca de este ID
+    .anchorByText("Datos de pago")      // y cerca de este texto visible
+    .inForm("form-pago")                // buscar solo dentro de este <form>
+    .excludeId("btn-cancelar-header");  // ignorar este ID aunque tenga score alto
 
-// Atajos directos
-web.healing.healAndClick(Element.id("btn-login-ROTO"));
-web.healing.healAndType(Element.id("input-user-ROTO"), "admin");
+web.healing.heal(Element.id("btn-pagar"), "TC_pago", ctx);
+web.healing.healAndClick(Element.id("btn-pagar"), ctx);
+web.healing.healAndType(Element.id("campo"), "valor", ctx);
 ```
 
-### 7.5 Lo que el servicio devuelve
+### Tipos de anchor
 
-**Respuesta exitosa (selector xpath):**
+```java
+HealContext.create()
+    .anchorById("campo-referencia")         // type="id",   weight=40
+    .anchorByText("Texto visible")          // type="text", weight=30
+    .anchorByName("nombre-campo")           // type="css",  value="[name='...']", weight=35
+    .anchorByAriaLabel("Etiqueta ARIA")     // type="css",  value="[aria-label='...']", weight=25
+    .anchor("css", "tr[aria-selected='true']", 40)  // CSS libre con peso personalizado
+```
+
+### Filtros de scope
+
+```java
+HealContext.create()
+    .inContainer("panel-principal")         // solo descendientes del elemento con ese ID
+    .inContainerClass("modal-body")         // ancestro con esa clase CSS
+    .inContainerClass("modal-body active")  // ambas clases (AND)
+    .inContainerClass("modal-body,form-section") // cualquiera (OR)
+    .inForm("loginForm")                    // dentro del <form id="loginForm">
+    .excludeId("header-close", "nav-logout") // IDs a ignorar aunque tengan score alto
+```
+
+### Guía rápida — cuándo usar cada filtro
+
+| Situación | Filtro |
+|---|---|
+| Mismo botón en header y en el form | `excludeId` + `inForm` |
+| Elemento dentro de un modal | `inContainerClass("modal-body")` |
+| App Angular con múltiples formularios | `inForm` |
+| App Siebel sin atributos estables | `anchor` por texto cercano |
+| Grid con fila seleccionada | `anchor("css", "tr[aria-selected='true']", 40)` |
+
+### Body completo enviado al servicio
+
 ```json
 {
-  "healed": true,
-  "new_selector": "//button[@data-testid='login-btn']",
   "selector_type": "xpath",
-  "strategy_used": "DOM",
-  "confidence": 0.87,
-  "healing_event_id": 42,
-  "from_cache": false
+  "selector_value": "//button[@id='btn-login']",
+  "dom_html": "<html>...</html>",
+  "project": "portal_rrhh",
+  "test_id": "TC_001_login",
+  "scoring_profile": "default",
+  "screenshot_base64": "...",
+  "anchors": [
+    { "type": "id",   "value": "username_input", "weight": 40 },
+    { "type": "text", "value": "Contraseña",      "weight": 30 },
+    { "type": "css",  "value": "#login-area",     "weight": 20 }
+  ],
+  "exclude_ids": ["header-close-btn", "nav-logout"],
+  "container_id": "main-content",
+  "form_id": "loginForm"
 }
 ```
-
-**Respuesta desde caché** (el servicio ya sanó este selector antes y lo recuerda):
-```json
-{
-  "healed": true,
-  "new_selector": "//button[@data-testid='login-btn']",
-  "selector_type": "HISTORY",
-  "confidence": 1.0,
-  "healing_event_id": 43,
-  "from_cache": true
-}
-```
-
-**Respuesta del motor CV** (el elemento se encontró por imagen, no por DOM):
-```json
-{
-  "healed": true,
-  "new_selector": "coords::320,150",
-  "selector_type": "coords",
-  "strategy_used": "CV",
-  "confidence": 0.91,
-  "healing_event_id": 44
-}
-```
-> Cuando `selector_type="coords"`, el cliente usa `document.elementFromPoint(x,y)` para
-> localizar el elemento. Esto es transparente — el cliente lo maneja automáticamente.
-
-### 7.6 Feedback automático (aprendizaje del servicio)
-
-Tras cada healing exitoso (o fallido), el cliente envía feedback al servicio en un **hilo de
-fondo** para que el motor aprenda. Este proceso es invisible para el test y no añade latencia.
-
-```
-Healing exitoso + elemento encontrado  → POST /heal/feedback { correct: true }
-Healing exitoso + elemento NO encontrado → POST /heal/feedback { correct: false }
-```
-
-No necesitas hacer nada — el framework lo gestiona solo.
-
-### 7.7 Errores del servicio y comportamiento esperado
-
-| Situación | Qué hace el cliente | Mensaje en consola |
-|---|---|---|
-| 404 — sin baseline | Falla con error original de Selenium | `Sin baseline registrado para '...'` |
-| 422 — ningún motor resolvió | Falla con error original de Selenium | `Ningún motor pudo sanar '...'` |
-| Servicio caído (5xx) | Reintenta 3 veces, luego falla normal | `Servicio no disponible (HTTP 503)` |
-| Timeout de red | Reintenta 3 veces, luego falla normal | `Servicio no disponible tras 3 intentos` |
-
-> **El servicio nunca debe colgar un test.** Si no responde en 10 segundos, el cliente
-> lanza excepción y el test falla con el error original de Selenium — como si el healing
-> no existiera.
-
-### 7.8 Monitorizar el servicio desde los tests
-
-```java
-// Estado del servicio
-Map<String, Object> health = web.healingClient.getHealth();
-assertEquals("ok", health.get("status"));
-
-// Estadísticas de tu proyecto
-Map<String, Object> metrics = web.healingClient.getMetrics("mi_proyecto");
-System.out.println("Sanaciones totales: " + metrics.get("total_heals"));
-
-// Historial de eventos
-Map<String, Object> history = web.healingClient.getHistory("mi_proyecto", 50);
-```
-
-### 7.9 Lo que el self-healing NO hace
-
-- **No arregla bugs** en el código de tests. Si el test falla por lógica incorrecta, no se sana.
-- **No funciona sin baseline.** Si no registraste el elemento antes de que rompiera, el servicio
-  devuelve 404 y el test falla normalmente.
-- **No sana `StaleElementReferenceException`** — ese error es del DOM cambiando durante la
-  interacción, no del selector. El framework lo reintenta directamente sin llamar al servicio.
-- **No cachea selectores localmente.** El servicio ya tiene su propia caché — el cliente
-  nunca guarda resultados de healing entre ejecuciones.
-- **No reintenta el healing más de una vez por elemento** en la misma ejecución. Si falla,
-  falla definitivamente.
 
 ---
 
-## 8. Assertions
+## 11. RepairRepository — caché local
 
-### Estrictas — fallan en el primer problema
+Almacena reparaciones aprobadas en SQLite local para evitar llamar al servicio
+cuando ya existe una reparación conocida y confiable.
+
+### Ciclo de vida de una entrada
+
+```
+saveOrUpdate() → entrada APPROVED
+touch()        → incrementar times_seen (caché sigue siendo válida)
+reject()       → marcar como REJECTED (selector ya no funciona en DOM)
+```
 
 ```java
-web.assertThat(resultado)
+RepairRepository repo = new RepairRepository("jdbc:sqlite:repair-history.db");
+
+// Guardar reparación recibida del servicio
+SuggestedLocator locator = new SuggestedLocator();
+locator.setType("xpath");
+locator.setValue("//button[contains(@class,'btn-primary')]");
+locator.setScore(87);
+locator.setReason("Coincidencia por texto + clase CSS");
+
+repo.saveOrUpdate("MY_APP", "http://app.com/login",
+    "xpath", "//button[@id='btn-login']", locator);
+
+// Consultar antes de llamar al servicio (TTL por defecto: 7 días)
+SuggestedLocator cached = repo.findApprovedRepair(
+    "MY_APP", "http://app.com/login",
+    "xpath", "//button[@id='btn-login']",
+    80);                     // score mínimo
+
+if (cached != null) {
+    driver.findElement(cached.toBy()).click();
+    repo.touch("MY_APP", "http://app.com/login",
+        "xpath", "//button[@id='btn-login']",
+        cached.getType(), cached.getValue());   // actualizar last_seen
+}
+
+// Consultar con TTL personalizado
+SuggestedLocator cached2 = repo.findApprovedRepair(
+    "MY_APP", "http://app.com/login",
+    "xpath", "//button[@id='btn-login']",
+    80, 30);                 // 30 días de TTL
+
+// Marcar como rechazada si el selector cacheado ya no funciona
+repo.reject("MY_APP", "http://app.com/login",
+    "xpath", "//button[@id='btn-login']",
+    cached.getType(), cached.getValue(),
+    "NoSuchElementException tras mutación del DOM");
+
+// Verificar si la página ya tiene reparaciones previas
+boolean tieneHistorial = repo.hasSuccessfulRepairs("MY_APP", "http://app.com/login");
+```
+
+---
+
+## 12. SmartAuditRecorder — trazabilidad
+
+Registra el ciclo de vida completo de cada intento de localización.
+No depende de ningún runner.
+
+```java
+SmartAuditRecorder audit = new SmartAuditRecorder(
+    "MY_APP", "AUTO",
+    "//button[@id='btn-login']",
+    "http://app.com/login");
+
+audit.record(SmartAuditEventType.START,          "Iniciando localización");
+audit.record(SmartAuditEventType.DIRECT_TRY,     "Intentando selector original");
+audit.record(SmartAuditEventType.DIRECT_FAIL,    "NoSuchElementException");
+audit.record(SmartAuditEventType.CACHE_LOOKUP,   "Buscando en caché SQLite");
+audit.record(SmartAuditEventType.CACHE_MISS,     "Sin resultado en caché");
+audit.record(SmartAuditEventType.IA_REQUEST,     "Enviando al servicio de healing");
+audit.record(SmartAuditEventType.IA_RESPONSE,    "Selector reparado recibido");
+audit.record(SmartAuditEventType.AUTO_HEAL_APPLIED, "Aplicando selector reparado");
+
+// Finalizar
+audit.finishSuccess("//button[contains(@class,'btn-primary')]", "HEALING_SERVICE");
+// o
+audit.finishFailure();
+
+SmartAuditReport report = audit.getReport();
+```
+
+### Eventos disponibles
+
+| Evento | Descripción |
+|---|---|
+| `START` | Inicio del intento de localización |
+| `DIRECT_TRY / SUCCESS / FAIL` | Intento con selector original |
+| `CACHE_LOOKUP / APPLIED / MISS` | Consulta y resultado del caché local |
+| `IA_REQUEST / RESPONSE` | Llamada al servicio de healing |
+| `AUTO_HEAL_APPLIED` | Selector reparado aplicado con éxito |
+
+---
+
+## 13. SiebelWaits — apps lentas
+
+Utilidades para apps lentas e inestables (Siebel CRM, SAP, Oracle Forms).
+No depende de ningún runner — se crea con un `WebDriver`.
+
+```java
+SiebelWaits siebel = new SiebelWaits(web.driver);
+
+// Esperar que la página esté realmente lista:
+// readyState + jQuery.active + spinner desaparecido
+siebel.waitForPageReady();
+
+// Esperar que el elemento esté visible Y habilitado
+// (tolera StaleElementReferenceException — Siebel reconstruye el DOM)
+WebElement el = siebel.waitReady("//input[@name='monto']");
+
+// Click con reintento ante StaleElement y ElementClickInterceptedException
+siebel.safeClick("//button[@id='confirmar']");
+
+// Escritura con verificación de que el valor persistió
+// (Siebel a veces borra lo que escribiste con un evento JS)
+siebel.safeSendKeys("//input[@name='monto']", "1500.00");
+
+// Esperar que el elemento desaparezca (ej: tras cerrar un diálogo)
+siebel.waitGone("//div[@class='modal-siebel']");
+```
+
+El spinner XPath por defecto cubre `.spinner`, `.loading`, `.loader`:
+
+```java
+SiebelWaits.SPINNER_XPATH
+// = "//*[contains(@class,'spinner') or contains(@class,'loading') or contains(@class,'loader')]"
+```
+
+---
+
+## 14. UiWatchdog + StabilityWait
+
+### UiWatchdog — detectar qué bloquea la UI
+
+```java
+WatchdogConfig config = new WatchdogConfig(
+    true,                                            // enabled
+    true,                                            // loadersBlockExecution
+    true,                                            // overlaysBlockExecution
+    Arrays.asList(".spinner", ".loading"),           // loaderSelectors
+    Arrays.asList(".modal-backdrop", ".overlay"),    // overlaySelectors
+    Arrays.asList("[role='dialog']"),                // modalSelectors
+    Arrays.asList(".alert-danger", ".error")         // errorSelectors
+);
+
+UiWatchdog watchdog = new UiWatchdog(driver, config);
+WatchdogResult result = watchdog.inspect();
+
+// result.getStatus() → CLEAN | LOADER_DETECTED | OVERLAY_DETECTED |
+//                      MODAL_DETECTED | ERROR_DETECTED | ALERT_DETECTED
+
+if (result.isBlocking()) {
+    System.out.println(result.toShortLog());
+    // → "MODAL_DETECTED: [role='dialog'] — texto: '¿Confirmar pago?'"
+}
+```
+
+### StabilityWait — esperar que la UI esté estable
+
+```java
+StabilityConfig cfg = StabilityConfig.defaultConfig();
+// defaultTimeoutSeconds=8, pollingMillis=250, stabilityCacheWindow=800ms
+
+StabilityWait stability = new StabilityWait(driver, cfg);
+
+stability.waitUntilReady();                          // cacheado — omite si ya se chequeó recientemente
+stability.waitUntilReadyFast();                      // sin jQuery, solo doc + loaders
+stability.waitUntilReady(Duration.ofSeconds(15));    // timeout explícito
+stability.invalidateCache();                         // forzar chequeo completo la próxima vez
+
+boolean ok      = stability.isUiStableFull();        // readyState + jQuery + loaders + overlays
+boolean okFast  = stability.isUiStableFast();        // readyState + loaders + overlays
+```
+
+---
+
+## 15. Assertions
+
+```java
+// Assertions estrictas — falla al primer error
+web.assertThat(elemento)
    .isVisible()
-   .hasText("Login exitoso")           // texto exacto
-   .containsText("exitoso")            // subcadena
-   .hasAttribute("class", "alert-success")
-   .hasClass("success");               // class contiene la subcadena
+   .isEnabled()
+   .hasText("Bienvenido, admin")
+   .containsText("Bienvenido")
+   .hasAttribute("class", "success")
+   .hasValue("admin");
 
-web.assertThat(inputField)
-   .hasValue("admin")
-   .isEnabled();
-
-web.assertThat(checkbox).isSelected();
-web.assertThat(boton).isDisabled();
-web.assertThat(lista).matchesCount(10);  // exactamente 10 elementos
-web.assertThat(error).doesNotExist();
-web.assertThat(panel).exists();
-```
-
-### Soft assertions — evalúan todo, reportan todos los fallos
-
-Cuando necesitas verificar múltiples aspectos de una pantalla y quieres ver todos los fallos
-de una vez (sin que el primero detenga la ejecución):
-
-```java
+// Assertions suaves — acumula todos los fallos y los lanza al final
 web.softAssert(sa -> {
-    sa.check(titulo)    .hasText("Dashboard");
-    sa.check(menuLateral).isVisible();
-    sa.check(campoUser) .hasValue("admin");
-    sa.check(contador)  .containsText("15 resultados");
-    sa.check(btnExportar).isEnabled();
+    sa.check(titulo).hasText("Dashboard");
+    sa.check(menu).isVisible();
+    sa.check(usuario).hasValue("admin");
+    sa.check(botonGuardar).isEnabled();
 });
-// Si hay N fallos: lanza AssertionError con todos los mensajes agrupados
-// Si todo pasa: continúa sin interrupciones
 ```
 
 ---
 
-## 9. Tablas
-
-Helper para tablas HTML (`<table>`) sin escribir XPaths manuales.
+## 16. Tablas
 
 ```java
 Table tabla = web.table(Element.id("tabla-usuarios"));
 
-// Leer
-String nombre = tabla.cell(0, "Nombre");        // fila 0, columna por cabecera
-String estado = tabla.cell(2, "Estado");
-int total     = tabla.rowCount();
+// Leer celdas
+String nombre   = tabla.cell(0, "Nombre");        // fila 0, columna "Nombre"
+String estado   = tabla.cell(2, "Estado");
 
-// Buscar y actuar
-tabla.rowWhere("Email", "juan@empresa.com").click();
+// Navegar filas
+tabla.rowWhere("Estado", "Activo").click();        // click en la fila con Estado=Activo
+int totalFilas = tabla.rowCount();
 
-// Obtener columna completa
-List<String> nombres = tabla.columnValues("Nombre");
-assertTrue(nombres.contains("Juan García"));
-
-// Verificar existencia de fila
-assertTrue(tabla.hasRowWhere("Estado", "Activo"));
+// Iterar
+tabla.rows().forEach(row -> {
+    String nombre2 = row.cell("Nombre");
+    if ("Inactivo".equals(row.cell("Estado"))) {
+        row.click();
+    }
+});
 ```
 
 ---
 
-## 10. PopupGuard
-
-Detecta y maneja popups inesperados (banners de cookies, alertas de sesión, modales de error)
-que de otro modo romperían el test con `ElementClickInterceptedException`.
-
-### Uso básico
+## 17. PopupGuard
 
 ```java
-// Proteger una acción puntual
-web.popupGuard.safely(() -> web.actions.click(guardarButton));
-
-// Con valor de retorno
-String texto = web.popupGuard.safely(() -> web.actions.read(mensajeElement));
-```
-
-### Registrar popups conocidos
-
-```java
-// En @BeforeEach — registrar los popups que puede mostrar tu app
-web.popupGuard.register("Banner de cookies",
+// Registrar popups conocidos
+web.popupGuard.register(
+    "Cookie Banner",
     By.id("cookie-consent"),
     driver -> driver.findElement(By.id("btn-accept-all")).click()
 );
 
-web.popupGuard.register(PopupRule.byText(
-    "Sesión por expirar",
-    "Su sesión expirará en",
-    driver -> driver.findElement(By.id("btn-extender-sesion")).click()
-));
-```
+web.popupGuard.register(
+    "Sesión expirada",
+    By.cssSelector(".session-timeout-modal"),
+    driver -> driver.findElement(By.cssSelector(".btn-renovar")).click()
+);
 
-### Protección global (hilo de fondo)
-
-Inicia un hilo daemon que escanea cada 2 segundos. Útil para apps con notificaciones
-imprevisibles durante ejecuciones largas.
-
-```java
-web.popupGuard.enableGlobalProtection();
-// ... ejecución del test ...
-web.popupGuard.disableGlobalProtection();
-```
-
-### Configurar alertas nativas
-
-```java
-// Por defecto: SCREENSHOT_AND_DISMISS (toma evidencia y cierra)
-web.popupGuard.onNativeAlert(PopupGuard.NativeAlertAction.FAIL);   // falla el test
-web.popupGuard.onNativeAlert(PopupGuard.NativeAlertAction.ACCEPT);
-web.popupGuard.onNativeAlert(PopupGuard.NativeAlertAction.DISMISS);
-```
-
-### Verificar historial al final del test
-
-```java
-assertFalse(web.popupGuard.hadUnexpectedPopups(),
-    "El test encontró popups no registrados — revisar la aplicación");
-
-web.popupGuard.getInterceptions()
-    .forEach(i -> System.out.println(i.getSummary()));
+// Envolver acciones sensibles
+web.popupGuard.safely(() -> web.actions.click(botonPago));
+// Si aparece un popup durante el click, se maneja automáticamente y se reintenta
 ```
 
 ---
 
-## 11. Cookies y Storage
+## 18. Cookies y Storage
 
 ```java
-// Cookies
-web.cookies.set("session_token", "abc123");
+// ── Cookies ────────────────────────────────────────────────────
+web.cookies.add("session_token", "abc123");
 String token = web.cookies.get("session_token");
 web.cookies.delete("session_token");
 web.cookies.deleteAll();
 
-// localStorage
-web.storage.local.set("preferencias", "{\"tema\":\"oscuro\"}");
-String prefs = web.storage.local.get("preferencias");
-web.storage.local.remove("preferencias");
-web.storage.local.clear();
+// ── localStorage ───────────────────────────────────────────────
+web.storage.setLocal("user_pref", "{\"theme\":\"dark\"}");
+String pref = web.storage.getLocal("user_pref");
+web.storage.removeLocal("user_pref");
+web.storage.clearLocal();
 
-// sessionStorage (misma API que local)
-web.storage.session.set("carrito", "[{\"id\":1}]");
+// ── sessionStorage ─────────────────────────────────────────────
+web.storage.setSession("temp_data", "valor");
+String temp = web.storage.getSession("temp_data");
+web.storage.clearSession();
 ```
 
 ---
 
-## 12. Ejecución paralela
+## 19. Integración con runners
 
-### Configuración en `junit-platform.properties`
+El framework no impone ningún runner. `Web.init()` abre el browser y `web.close()` lo cierra.
 
-```properties
-# Activar paralelismo (false = secuencial, útil para depurar)
-junit.jupiter.execution.parallel.enabled = true
-junit.jupiter.execution.parallel.mode.default = concurrent
-junit.jupiter.execution.parallel.mode.classes.default = concurrent
-
-# 3 browsers en paralelo — ajustar según RAM disponible (cada Chrome ≈ 150-300 MB)
-junit.jupiter.execution.parallel.config.strategy = fixed
-junit.jupiter.execution.parallel.config.fixed.parallelism = 3
-```
-
-### Cómo funciona
-
-JUnit 5 usa `PER_METHOD` por defecto: cada método de test recibe su propia instancia de
-`BaseTest` → su propio `Web` → su propio browser. No hay estado compartido entre tests.
-
-```
-Test A (hilo 1) → instancia BaseTest_1 → Web_1 → Chrome_1
-Test B (hilo 2) → instancia BaseTest_2 → Web_2 → Chrome_2
-Test C (hilo 3) → instancia BaseTest_3 → Web_3 → Chrome_3
-```
-
-### WebContext — acceder al driver sin referencias directas
-
-Para extensiones JUnit, page objects o utilidades que no tienen referencia al test:
+### JUnit 5
 
 ```java
-Web       web    = WebContext.get();     // sesión del hilo actual
-WebDriver driver = WebContext.driver(); // driver del hilo actual
-```
-
-`BaseTest` gestiona el ciclo automáticamente:
-```
-@BeforeEach → WebContext.set(web)   // registrar al inicio
-@AfterEach  → WebContext.remove()  // limpiar al final (evita memory leaks)
-```
-
-### Tests que no pueden correr en paralelo
-
-```java
-@Test
-@ResourceLock("datos-compartidos")   // exclusividad para tests que modifican datos globales
-void testQueModificaConfiguracionGlobal() { ... }
-```
-
-### Ajustar paralelismo según el entorno
-
-```bash
-# En un servidor CI con 8 cores y 16 GB RAM
-mvn test -Djunit.jupiter.execution.parallel.config.fixed.parallelism=6
-
-# En local para depurar un fallo puntual
-mvn test -Djunit.jupiter.execution.parallel.enabled=false
-```
-
----
-
-## 13. Retry automático
-
-Reinicia el browser y reintenta el test si falla. Para flakiness del entorno, **no** para
-enmascarar bugs.
-
-```java
-@Test
-@RetryOnFailure(times = 2)   // 2 reintentos → hasta 3 intentos en total
-void testInestable() { ... }
-```
-
-Cada reintento ejecuta `@AfterEach` → cierra browser → `@BeforeEach` → abre browser nuevo.
-Si el test pasa en cualquier intento, se considera exitoso.
-
----
-
-## 14. BaseTest — clase base para tests
-
-Heredar de `BaseTest` proporciona automáticamente:
-
-| Qué | Cómo se usa |
-|---|---|
-| `web` | Sesión `Web` lista, configurada desde `config.properties` |
-| `driver` | `WebDriver` Selenium directo (para operaciones nativas) |
-| Screenshot en fallo | Se guarda en `screenshots/failures/` con timestamp |
-| StepLogger | Imprime cada acción: `[14:32:01] STEP  click → Botón login` |
-| `@RetryOnFailure` | Disponible en cualquier método |
-| Soporte paralelo | Cada método tiene su propio browser |
-| `web.healingClient` | Cliente HTTP al servicio (para tests de métricas/salud) |
-
-```java
-@DisplayName("Mi módulo")
-class TestMiModulo extends BaseTest {
+class LoginTest {
+    Web web;
 
     @BeforeEach
-    void prepararBaselines() {
-        // Registrar antes de que los selectores puedan cambiar
-        web.healing.register(Element.id("btn-accion"), "btn_accion");
-    }
+    void setUp() { web = Web.init(ConfigLoader.webConfig()); }
+
+    @AfterEach
+    void tearDown() { web.close(); }
 
     @Test
-    void testEscenarioPrincipal() {
-        web.actions.type(Element.id("campo"), "valor");
-        web.assertThat(Element.id("resultado")).isVisible();
-    }
-
-    @Test
-    @RetryOnFailure(times = 1)
-    void testConReintento() { ... }
-}
-```
-
-### Helpers heredados de `SiebelWaits`
-
-Para apps lentas con DOM inestable (Siebel, SAP, Oracle Forms):
-
-```java
-safeClick("//button[@id='guardar']");          // click con reintento ante DOM inestable
-safeSendKeys("//input[@id='campo']", "valor"); // escritura con verificación de persistencia
-waitForPageReady();                             // readyState + AJAX + spinner
-WebElement el = waitReady("//input[@id='x']"); // visible + enabled
-waitGone("//div[@id='modal']");                // esperar que desaparezca
-```
-
----
-
-## 15. Patrones recomendados
-
-### Page Object Model
-
-```java
-// BasePage — heredar en todas las páginas
-public abstract class BasePage {
-    protected final Web web;
-
-    protected BasePage(Web web) { this.web = web; }
-}
-
-// Página concreta
-public class LoginPage extends BasePage {
-    private static final Element USUARIO   = Element.id("input-username").label("Usuario");
-    private static final Element PASSWORD  = Element.id("input-password").label("Password");
-    private static final Element BTN_LOGIN = Element.id("btn-login").label("Botón Login");
-
-    public LoginPage(Web web) { super(web); }
-
-    public void login(String usuario, String password) {
-        web.actions.type(USUARIO,  usuario);
-        web.actions.type(PASSWORD, password);
-        web.actions.click(BTN_LOGIN);
-    }
-}
-
-// En el test
-class TestLogin extends BaseTest {
-    @Test
-    void testLoginExitoso() {
-        new LoginPage(web).login("admin", "secreto");
+    void login() {
+        web.actions.type(Element.id("username"), "admin");
+        web.actions.click(Element.id("btn-login"));
         web.assertThat(Element.id("dashboard")).isVisible();
     }
 }
 ```
 
-### Registrar baselines una sola vez por clase
+### TestNG
 
 ```java
-class TestGestionUsuarios extends BaseTest {
+public class LoginTest {
+    Web web;
 
-    // Registrar todos los baselines del módulo antes de los tests
-    @BeforeEach
-    void baselines() {
-        web.healing.register(Element.id("btn-nuevo-usuario"), "btn_nuevo");
-        web.healing.register(Element.id("tabla-usuarios"),    "tabla_usuarios");
-        web.healing.register(Element.id("btn-guardar"),       "btn_guardar");
-    }
+    @BeforeMethod
+    public void setUp() { web = Web.init(ConfigLoader.webConfig()); }
+
+    @AfterMethod
+    public void tearDown() { web.close(); }
 
     @Test
-    void testCrearUsuario() { ... }
-
-    @Test
-    void testEditarUsuario() { ... }
-}
-```
-
-### Separar datos de prueba del código
-
-```java
-@ParameterizedTest
-@CsvSource({
-    "admin,      secreto,  Dashboard",
-    "supervisor, clave123, Panel supervisión",
-    "consultor,  pass456,  Vista consulta"
-})
-void testLoginMultiplesRoles(String usuario, String password, String panelEsperado) {
-    web.actions.type(USUARIO,  usuario);
-    web.actions.type(PASSWORD, password);
-    web.actions.click(BTN_LOGIN);
-    web.assertThat(TITULO_PANEL).containsText(panelEsperado);
-}
-```
-
-### Configurar popups una vez a nivel de clase
-
-```java
-class TestPortalRRHH extends BaseTest {
-
-    @BeforeEach
-    void configurarEntorno() {
-        // Popups específicos de este portal
-        web.popupGuard.register("Aviso de cookies",
-            By.id("cookie-banner"),
-            driver -> driver.findElement(By.id("btn-aceptar")).click()
-        );
-        web.popupGuard.register("Sesión por expirar",
-            By.xpath("//*[contains(text(),'expirará en')]"),
-            driver -> driver.findElement(By.id("btn-extender")).click()
-        );
+    public void login() {
+        web.actions.type(Element.id("username"), "admin");
+        web.actions.click(Element.id("btn-login"));
+        web.assertThat(Element.id("dashboard")).isVisible();
     }
 }
 ```
 
+### Cucumber
+
+```java
+// Hooks.java
+public class Hooks {
+    private Web web;
+
+    @Before
+    public void setUp() {
+        web = Web.init(ConfigLoader.webConfig());
+        WebContext.set(web);
+    }
+
+    @After
+    public void tearDown() {
+        if (web != null) web.close();
+        WebContext.remove();
+    }
+}
+
+// LoginSteps.java
+public class LoginSteps {
+    private final Web web = WebContext.get();
+
+    @When("el usuario ingresa credenciales válidas")
+    public void ingresaCredenciales() {
+        web.actions.type(Element.id("username"), "admin");
+        web.actions.type(Element.id("password"), "secret");
+        web.actions.click(Element.id("btn-login"));
+    }
+
+    @Then("debe ver el dashboard")
+    public void verDashboard() {
+        web.assertThat(Element.id("dashboard")).isVisible();
+    }
+}
+```
+
+### Main de Java puro
+
+```java
+public class Main {
+    public static void main(String[] args) {
+        WebConfig config = WebConfig.builder()
+            .url("http://mi-app.com")
+            .project("mi-proyecto")
+            .build();
+
+        Web web = Web.init(config);
+        try {
+            SiebelWaits siebel = new SiebelWaits(web.driver);
+            siebel.waitForPageReady();
+            web.healing.register(Element.id("btn-login"), "baseline_login");
+            web.actions.type(Element.id("username"), "admin");
+            web.actions.click(Element.id("btn-login"));
+            web.assertThat(Element.id("dashboard")).isVisible();
+        } finally {
+            web.close();
+        }
+    }
+}
+```
+
+### Ejecución paralela
+
+Con JUnit 5 en modo `PER_METHOD`, cada test recibe su propia instancia y su propio browser.
+Usar `WebContext` (ThreadLocal) para que extensiones y steps accedan al driver correcto:
+
+```java
+// En setUp
+WebContext.set(web);
+
+// En tearDown
+WebContext.remove();
+
+// En extensiones / steps
+WebDriver driver = WebContext.driver();   // null si el hilo no tiene sesión activa
+Web web = WebContext.get();
+```
+
 ---
 
-## 16. Preguntas frecuentes y troubleshooting
+## 20. Referencia rápida de la API
 
-### El healing devuelve 404 — ¿qué significa?
+### `Web` — punto de entrada
 
-El servicio no tiene baseline para ese elemento en ese proyecto. Solución: añadir
-`web.healing.register(element, testId)` en `@BeforeEach` cuando el selector funcione.
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `web.actions` | `Actions` | Escritura, clicks, scroll, drag, selects, alertas |
+| `web.waits` | `Waits` | Esperas basadas en condiciones |
+| `web.healing` | `HealingActions` | Registro de baselines y sanación |
+| `web.popupGuard` | `PopupGuard` | Manejo automático de popups |
+| `web.cookies` | `CookieActions` | Gestión de cookies |
+| `web.storage` | `StorageActions` | localStorage y sessionStorage |
+| `web.healingClient` | `HealingClient` | Acceso directo a endpoints del servicio |
+| `web.driver` | `WebDriver` | Driver de Selenium (operaciones avanzadas) |
 
-### El healing devuelve 422 — ¿qué significa?
-
-El servicio tiene el baseline pero ningún motor (DOM, CV, historial) encontró el elemento
-con confianza suficiente. Causas comunes:
-- La página cambió demasiado para que el matching funcione
-- El elemento desapareció de la aplicación (bug real, no problema de selector)
-- El perfil de scoring no es el adecuado — probar otro `scoring_profile`
-
-### El test sigue fallando aunque el healing "sanó" el selector
-
-Ocurre cuando el servicio devuelve `healed=true` pero el `new_selector` tampoco funciona
-en el DOM actual. El cliente envía `feedback(correct=false)` automáticamente para que el
-servicio aprenda. El test falla con el error original — es el comportamiento correcto.
-
-### Los tests pasan en local pero fallan en CI
-
-Verificar:
-1. `driver.headless=true` en CI — sin pantalla no hay display
-2. `driver.timeout.element` y `pageLoad` — CI suele ser más lento
-3. `healing.url` apunta al servicio correcto en el entorno CI
-4. El servicio de healing está corriendo en CI
-
-```bash
-# Verificar antes de lanzar los tests en CI
-curl http://localhost:8765/health
+```java
+Web web = Web.init(config);           // abre browser + navega a config.getUrl()
+Web web = Web.init("url", "project"); // atajo rápido
+web.navigateTo("http://otra-url.com");
+web.assertThat(elemento);
+web.softAssert(sa -> { ... });
+web.table(elemento);
+web.close();                          // cerrar browser y liberar recursos
 ```
 
-### Los tests fallan con `StaleElementReferenceException`
+### `HealingActions` — métodos de healing
 
-No es un problema de selector — el DOM cambió durante la interacción. Usar los helpers de
-`SiebelWaits` (`safeClick`, `safeSendKeys`) o `web.waits.untilPageReady()` antes de la
-acción. El healing **no** se activa para este tipo de error.
+```java
+web.healing.register(element)
+web.healing.register(element, testId)
 
-### ¿Cómo desactivar el paralelismo para depurar?
+web.healing.heal(element)
+web.healing.heal(element, testId)
+web.healing.heal(element, testId, context)
 
-```bash
-mvn test -Djunit.jupiter.execution.parallel.enabled=false -Dtest=TestMiClase
+web.healing.healAndClick(element)
+web.healing.healAndClick(element, context)
+
+web.healing.healAndType(element, text)
+web.healing.healAndType(element, text, context)
 ```
 
-O temporalmente en `junit-platform.properties`:
-```properties
-junit.jupiter.execution.parallel.enabled = false
+### `RepairRepository` — métodos de caché
+
+```java
+new RepairRepository("jdbc:sqlite:repair-history.db")
+
+repo.saveOrUpdate(app, pageUrl, originalType, originalValue, suggestedLocator)
+repo.touch(app, pageUrl, originalType, originalValue, repairedType, repairedValue)
+repo.reject(app, pageUrl, originalType, originalValue, repairedType, repairedValue, reason)
+
+repo.findApprovedRepair(app, pageUrl, originalType, originalValue, minScore)          // TTL=7d
+repo.findApprovedRepair(app, pageUrl, originalType, originalValue, minScore, ttlDays)
+repo.hasSuccessfulRepairs(app, pageUrl)
 ```
 
-### ¿Cuántos browsers puedo lanzar en paralelo?
+### `HealContext` — builder de filtros
 
-Regla general: `(RAM disponible en GB) / 0.5 = máximo de browsers`. Con 8 GB de RAM libre,
-máximo ~16 — pero la experiencia indica que 4-6 es el rango óptimo para CI. En local, 3.
-
-### ¿Por qué `@RetryOnFailure` no debería usarse siempre?
-
-Enmasca problemas reales. Si un test falla consistentemente, es un bug — no hay que
-reintentar. Reservar para flakiness confirmada del entorno (red, servicio externo inestable).
-
-### El servicio de healing no responde — ¿el test cuelga?
-
-No. El cliente tiene un timeout de 10 segundos (conexión + respuesta). Si el servicio no
-responde, el cliente reintenta 3 veces con backoff (500ms → 1s → 2s) y luego lanza la
-excepción original de Selenium. El test falla normalmente, nunca se queda colgado.
+```java
+HealContext.create()
+    .anchor(type, value, weight)     // "id" | "text" | "css"
+    .anchorById(id)                  // weight=40
+    .anchorByText(text)              // weight=30
+    .anchorByName(name)              // css=[name='...'], weight=35
+    .anchorByAriaLabel(label)        // css=[aria-label='...'], weight=25
+    .inContainer(id)
+    .inContainerClass(cssClass)      // "clase" | "c1 c2" (AND) | "c1,c2" (OR)
+    .inForm(formId)
+    .excludeId(ids...)
+```
 
 ---
 
-## 17. Referencia rápida de la API
+## Ejecutar la demo
 
-```
-Web
-├── actions
-│   ├── type(el, text) / append / typeSlow(el, text, ms) / typeJS / pressKey / clear / clearJS
-│   ├── click(el) / clickJS / doubleClick / rightClick / clickAt(el, x, y) / clickByKeyboard
-│   ├── read(el) / readValue / readAttribute(el, attr)
-│   ├── isVisible(el) / isEnabled / isSelected
-│   ├── fillForm(Map<Element, String>)
-│   ├── scroll.*    → toElement / toTop / toBottom / byPixels(x, y)
-│   ├── visual.*    → highlight / blink(el, times) / screenshot(name)
-│   ├── select.*    → byText / byValue / byIndex
-│   ├── drag.*      → dragAndDrop(from, to)
-│   ├── alert.*     → readAndAccept / dismiss / typeAndAccept(text)
-│   └── navigate.*  → back / refresh / openNewTab(url) / switchToFrame / switchToDefaultContent
-│
-├── waits
-│   └── untilPageReady / untilVisible / untilClickable / untilGone / untilTextPresent / sleep
-│
-├── healing
-│   ├── register(element) / register(element, testId)
-│   ├── heal(element) / heal(element, testId)
-│   ├── healAndClick(element)
-│   └── healAndType(element, text)
-│
-├── healingClient                          ← HTTP directo al servicio
-│   ├── getHealth()
-│   ├── getMetrics(project)
-│   └── getHistory(project, limit)
-│
-├── popupGuard
-│   ├── register(name, By, handler) / register(PopupRule)
-│   ├── safely(Runnable) / safely(Supplier<T>)
-│   ├── enableGlobalProtection / disableGlobalProtection
-│   ├── scan()
-│   ├── onNativeAlert(NativeAlertAction)
-│   ├── getInterceptions / hadUnexpectedPopups / clearInterceptions
-│   └── screenshotDir(path)
-│
-├── cookies
-│   └── set / get / delete / deleteAll
-│
-├── storage
-│   ├── local.*   → set / get / remove / clear
-│   └── session.* → set / get / remove / clear
-│
-├── driver                  ← WebDriver directo (escape hatch para operaciones no cubiertas)
-│
-├── assertThat(element)     → WebAssert
-│   └── isVisible / isNotVisible / isEnabled / isDisabled / isSelected / isNotSelected
-│       hasText / containsText / hasValue / hasAttribute / hasClass
-│       exists / doesNotExist / matchesCount(n)
-│
-├── softAssert(Consumer<SoftAssertions>)   → acumula fallos, lanza al final
-│
-├── table(element)          → Table
-│   └── cell(row, colHeader) / rowCount / columnValues(header)
-│       rowWhere(col, val).click() / hasRowWhere(col, val)
-│
-└── navigateTo(url)
+```bash
+# Requiere: servicio en :8765 y demo app en :9000
+mvn test-compile exec:java \
+    -Dexec.mainClass="com.selfhealing.demo.DemoMain" \
+    -Dexec.classpathScope=test
 ```
 
-### `Element` — factory methods
-
-```
-Element.id(value)    .label(name)
-Element.xpath(value) .label(name)
-Element.css(value)   .label(name)
-Element.name(value)  .label(name)
-Element.text(value)  .label(name)
-```
-
-### `WebConfig.Builder` — opciones de configuración
-
-```
-.url(String)                       obligatorio
-.project(String)                   obligatorio — único por proyecto
-.browser(Browser.CHROME/FIREFOX/EDGE)
-.headless(boolean)
-.timeoutSeconds(int)               esperas de elementos — default 30
-.pageLoadTimeoutSeconds(int)       carga de página — default 60
-.scoringProfile(ScoringProfile)    DEFAULT / SIEBEL / ANGULAR / LEGACY
-.healingUrl(String)                default http://localhost:8765
-.proxy(host, port)
-.chromeArg(String)                 se puede llamar múltiples veces
-.chromeArgs(String...)
-.chromePref(key, value)            preferencias de Chrome
-.customizeChrome(Consumer<ChromeOptions>)
-.customizeEdge(Consumer<EdgeOptions>)
-.customizeFirefox(Consumer<FirefoxOptions>)
-```
+La demo cubre todos los módulos sin necesitar un runner de tests:
+`[CONFIG]` `[HEAL-A]` `[HEAL-B]` `[STABLE]` `[SIEBEL]` `[WATCH]` `[REPO]` `[AUDIT]`

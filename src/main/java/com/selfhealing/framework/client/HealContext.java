@@ -15,7 +15,8 @@ import java.util.List;
  * <ul>
  *   <li><b>anchors</b> — cuando la página tiene varios elementos similares y
  *       quieres que el motor priorice el que esté cerca de un elemento de referencia
- *       conocido (ej: el botón "Aceptar" que está junto al label "Monto").</li>
+ *       conocido (ej: el botón "Aceptar" que está junto al label "Monto").
+ *       Tipos de anchor válidos: {@code "id"}, {@code "text"}, {@code "css"}.</li>
  *   <li><b>inContainer</b> — cuando el elemento pertenece a una sección concreta
  *       de la página (ej: solo buscar dentro del panel de "Datos personales").</li>
  *   <li><b>inForm</b> — equivalente a inContainer pero semántico: limita la búsqueda
@@ -68,8 +69,7 @@ public class HealContext {
      * <p>El servicio sumará un bonus de proximidad (hasta +30 pts) a los
      * candidatos que se encuentren a ≤3 nodos de distancia del anchor.</p>
      *
-     * @param type   tipo del identificador del anchor: {@code "id"}, {@code "text"},
-     *               {@code "name"}, {@code "class"}, {@code "aria_label"}
+     * @param type   tipo del identificador del anchor: {@code "id"}, {@code "text"}, {@code "css"}
      * @param value  valor que identifica el elemento de referencia
      * @param weight importancia relativa de este anchor (1–100).
      *               Recomendado: usar 40 para el anchor principal, 20–30 para secundarios.
@@ -89,14 +89,20 @@ public class HealContext {
         return anchor("text", text, 30);
     }
 
-    /** Atajo: anchor por name con peso 35. */
+    /**
+     * Atajo: anchor por atributo name (resuelto como selector CSS {@code [name='value']}).
+     * El servicio acepta "id", "text" y "css" — name se envía como CSS para compatibilidad.
+     */
     public HealContext anchorByName(String name) {
-        return anchor("name", name, 35);
+        return anchor("css", "[name='" + name + "']", 35);
     }
 
-    /** Atajo: anchor por aria-label con peso 25. */
+    /**
+     * Atajo: anchor por aria-label (resuelto como selector CSS {@code [aria-label='value']}).
+     * El servicio acepta "id", "text" y "css" — aria-label se envía como CSS para compatibilidad.
+     */
     public HealContext anchorByAriaLabel(String ariaLabel) {
-        return anchor("aria_label", ariaLabel, 25);
+        return anchor("css", "[aria-label='" + ariaLabel + "']", 25);
     }
 
     // ── Container ────────────────────────────────────────────────────────────

@@ -125,7 +125,7 @@ public abstract class AbstractActionGroup {
             if (!element.isDisplayed()) throw new ElementNotInteractableException("El elemento no está visible.");
             if (!element.isEnabled())   throw new ElementNotInteractableException("El elemento no está habilitado.");
             return element;
-        } catch (StaleElementReferenceException | WebDriverException e) {
+        } catch (WebDriverException e) {
             throw e;
         }
     }

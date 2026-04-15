@@ -71,6 +71,12 @@ public class WebConfig {
     private final String         healingUrl;
     private final ScoringProfile scoringProfile;
 
+    // ── Caché local de reparaciones ───────────────────────────────
+    private final boolean repairCacheEnabled;
+    private final String  repairDbPath;
+    private final int     repairCacheTtlDays;
+    private final int     repairCacheMinScore;
+
     // ── Timeouts ──────────────────────────────────────────────────
     private final int     timeoutSeconds;
     private final int     pageLoadTimeoutSeconds;
@@ -121,6 +127,10 @@ public class WebConfig {
         this.project                = b.project;
         this.healingUrl             = b.healingUrl;
         this.scoringProfile         = b.scoringProfile;
+        this.repairCacheEnabled     = b.repairCacheEnabled;
+        this.repairDbPath           = b.repairDbPath;
+        this.repairCacheTtlDays     = b.repairCacheTtlDays;
+        this.repairCacheMinScore    = b.repairCacheMinScore;
         this.timeoutSeconds         = b.timeoutSeconds;
         this.pageLoadTimeoutSeconds = b.pageLoadTimeoutSeconds;
         this.headless               = b.headless;
@@ -136,10 +146,14 @@ public class WebConfig {
 
     // ── Getters ───────────────────────────────────────────────────
 
-    public String         getUrl()             { return url;             }
-    public String         getProject()        { return project;         }
-    public String         getHealingUrl()     { return healingUrl;      }
-    public ScoringProfile getScoringProfile() { return scoringProfile;  }
+    public String         getUrl()                  { return url;                  }
+    public String         getProject()             { return project;              }
+    public String         getHealingUrl()          { return healingUrl;           }
+    public ScoringProfile getScoringProfile()      { return scoringProfile;       }
+    public boolean        isRepairCacheEnabled()   { return repairCacheEnabled;   }
+    public String         getRepairDbPath()        { return repairDbPath;         }
+    public int            getRepairCacheTtlDays()  { return repairCacheTtlDays;   }
+    public int            getRepairCacheMinScore() { return repairCacheMinScore;  }
     public int     getTimeoutSeconds()         { return timeoutSeconds;         }
     public int     getPageLoadTimeoutSeconds() { return pageLoadTimeoutSeconds; }
     public boolean isHeadless()                { return headless;               }
@@ -184,6 +198,11 @@ public class WebConfig {
         private String         project         = "default";
         private String         healingUrl      = "http://localhost:8765";
         private ScoringProfile scoringProfile  = ScoringProfile.DEFAULT;
+        // caché local
+        private boolean repairCacheEnabled  = true;
+        private String  repairDbPath        = "jdbc:sqlite:repair-history.db";
+        private int     repairCacheTtlDays  = 7;
+        private int     repairCacheMinScore = 80;
         private int     timeoutSeconds         = 30;
         private int     pageLoadTimeoutSeconds = 60;
         private boolean headless               = false;
@@ -209,6 +228,41 @@ public class WebConfig {
 
         /** URL del servicio de self-healing. Por defecto: {@code http://localhost:8765}. */
         public Builder healingUrl(String url)      { this.healingUrl = url;  return this; }
+
+        /**
+         * Activa o desactiva el caché local SQLite de reparaciones. Por defecto: {@code true}.
+         * Desactivar en entornos CI donde el caché no debe persistir entre ejecuciones.
+         */
+        public Builder repairCacheEnabled(boolean enabled) {
+            this.repairCacheEnabled = enabled; return this;
+        }
+
+        /**
+         * Ruta JDBC del SQLite para el caché local. Por defecto: {@code jdbc:sqlite:repair-history.db}.
+         *
+         * <pre>{@code
+         * .repairDbPath("jdbc:sqlite:/var/lib/tests/repair-history.db")
+         * }</pre>
+         */
+        public Builder repairDbPath(String jdbcUrl) {
+            this.repairDbPath = jdbcUrl; return this;
+        }
+
+        /**
+         * Días que una entrada del caché se considera válida desde su último uso.
+         * Por defecto: 7. Usar 0 para deshabilitar expiración.
+         */
+        public Builder repairCacheTtlDays(int days) {
+            this.repairCacheTtlDays = days; return this;
+        }
+
+        /**
+         * Score mínimo (0-100) para usar una entrada del caché local.
+         * Por defecto: 80. Bajar para más hits de caché, subir para más precisión.
+         */
+        public Builder repairCacheMinScore(int score) {
+            this.repairCacheMinScore = score; return this;
+        }
 
         /**
          * Perfil de scoring del servicio de healing. Por defecto: {@link ScoringProfile#DEFAULT}.
