@@ -39,10 +39,10 @@ healing.scoring_profile = default
 
 
 # ── Driver ────────────────────────────────────────────────────
-# Navegador: chrome | firefox | edge
+# Navegador: chrome | firefox | edge | ie
 driver.browser = chrome
 
-# true en entornos CI/CD sin pantalla (headless mode)
+# true en entornos CI/CD sin pantalla (headless mode). No aplica a IE.
 driver.headless = false
 
 # Timeout en segundos para esperas de elementos (untilVisible, untilClickable...)
@@ -50,6 +50,15 @@ driver.timeout.element = 30
 
 # Timeout en segundos para carga de página completa
 driver.timeout.pageLoad = 60
+
+# Directorio con los ejecutables del driver descargados manualmente.
+# El framework selecciona el ejecutable correcto según driver.browser:
+#   chrome  → chromedriver.exe
+#   edge    → msedgedriver.exe
+#   firefox → geckodriver.exe
+#   ie      → IEDriverServer.exe
+# Dejar vacío solo si hay acceso a internet para Selenium Manager.
+driver.path = C:/Selenium/driver
 
 
 # ── Proxy (dejar vacíos si no hay proxy corporativo) ──────────
@@ -72,3 +81,30 @@ chrome.args =
 #   chrome.pref.download.default_directory = C:/descargas
 #   chrome.pref.download.prompt_for_download = false
 #   chrome.pref.plugins.always_open_pdf_externally = true
+
+
+# ── Caché local de reparaciones ───────────────────────────────
+repair.cache.enabled = true
+repair.db.path = jdbc:sqlite:repair-history.db
+repair.cache.ttl.days = 7
+repair.cache.min.score = 80
+
+
+# ── Watchdog ──────────────────────────────────────────────────
+watchdog.enabled = true
+watchdog.loaders.block = true
+watchdog.overlays.block = true
+watchdog.loader.selectors = .loading,.spinner,.loader,[data-testid='loader']
+watchdog.overlay.selectors = .modal-backdrop,.overlay,.block-ui-wrapper,.ui-widget-overlay
+watchdog.modal.selectors = .modal,[role='dialog'],.ui-dialog,.popup
+watchdog.error.selectors = .error,.alert,.alert-danger,.message-error,.notification-error
+
+
+# ── Stability ─────────────────────────────────────────────────
+stability.timeout.seconds = 8
+stability.polling.millis = 250
+stability.max.retries = 0
+stability.wait.document.ready = true
+stability.wait.jquery = false
+stability.fast.recovery.seconds = 2
+stability.cache.window.millis = 800

@@ -1,10 +1,16 @@
 package com.selfhealing.config;
 
 import com.selfhealing.framework.config.WebConfig;
+import com.selfhealing.framework.waits.StabilityConfig;
+import com.selfhealing.framework.watchdog.WatchdogConfig;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 /**
  * Carga la configuración del framework desde {@code config.properties}
@@ -63,6 +69,20 @@ public class ConfigLoader {
         // Scoring profile del servicio de healing
         builder.scoringProfile(parseScoringProfile(get("healing.scoring_profile")));
 
+        // Ruta local del driver (desactiva descarga automática de Selenium Manager)
+        String driverPath = get("driver.path");
+        if (!driverPath.isEmpty()) builder.driverPath(driverPath);
+
+        // Caché local de reparaciones
+        String repairCacheEnabled = get("repair.cache.enabled");
+        if (!repairCacheEnabled.isEmpty()) builder.repairCacheEnabled(bool("repair.cache.enabled"));
+        String repairDbPath = get("repair.db.path");
+        if (!repairDbPath.isEmpty()) builder.repairDbPath(repairDbPath);
+        String repairTtl = get("repair.cache.ttl.days");
+        if (!repairTtl.isEmpty()) builder.repairCacheTtlDays(Integer.parseInt(repairTtl.trim()));
+        String repairMinScore = get("repair.cache.min.score");
+        if (!repairMinScore.isEmpty()) builder.repairCacheMinScore(Integer.parseInt(repairMinScore.trim()));
+
         // Proxy — solo si el host está definido
         String proxyHost = get("proxy.host");
         String proxyPort = get("proxy.port");
@@ -91,6 +111,71 @@ public class ConfigLoader {
         }
 
         return builder.build();
+    }
+
+    /**
+     * Construye un {@link WatchdogConfig} con los valores de {@code config.properties}.
+     * Si una clave no está definida se usa el default hardcodeado en {@link WatchdogConfig}.
+     */
+    public static WatchdogConfig watchdogConfig() {
+        WatchdogConfig cfg = WatchdogConfig.defaultConfig();
+
+        String enabled = get("watchdog.enabled");
+        if (!enabled.isEmpty()) cfg.setEnabled(bool("watchdog.enabled"));
+
+        String loadersBlock = get("watchdog.loaders.block");
+        if (!loadersBlock.isEmpty()) cfg.setLoadersBlockExecution(bool("watchdog.loaders.block"));
+
+        String overlaysBlock = get("watchdog.overlays.block");
+        if (!overlaysBlock.isEmpty()) cfg.setOverlaysBlockExecution(bool("watchdog.overlays.block"));
+
+        String loaderSels = get("watchdog.loader.selectors");
+        if (!loaderSels.isEmpty()) cfg.setLoaderSelectors(parseList(loaderSels));
+
+        String overlaySels = get("watchdog.overlay.selectors");
+        if (!overlaySels.isEmpty()) cfg.setOverlaySelectors(parseList(overlaySels));
+
+        String modalSels = get("watchdog.modal.selectors");
+        if (!modalSels.isEmpty()) cfg.setModalSelectors(parseList(modalSels));
+
+        String errorSels = get("watchdog.error.selectors");
+        if (!errorSels.isEmpty()) cfg.setErrorSelectors(parseList(errorSels));
+
+        return cfg;
+    }
+
+    /**
+     * Construye un {@link StabilityConfig} con los valores de {@code config.properties}.
+     * Incluye el {@link WatchdogConfig} construido desde el mismo archivo.
+     * Si una clave no está definida se usa el default hardcodeado en {@link StabilityConfig}.
+     */
+    public static StabilityConfig stabilityConfig() {
+        StabilityConfig cfg = StabilityConfig.defaultConfig();
+
+        String timeout = get("stability.timeout.seconds");
+        if (!timeout.isEmpty()) cfg.setDefaultTimeout(Duration.ofSeconds(Long.parseLong(timeout.trim())));
+
+        String polling = get("stability.polling.millis");
+        if (!polling.isEmpty()) cfg.setPollingInterval(Duration.ofMillis(Long.parseLong(polling.trim())));
+
+        String maxRetries = get("stability.max.retries");
+        if (!maxRetries.isEmpty()) cfg.setMaxRetries(Integer.parseInt(maxRetries.trim()));
+
+        String docReady = get("stability.wait.document.ready");
+        if (!docReady.isEmpty()) cfg.setWaitForDocumentReady(bool("stability.wait.document.ready"));
+
+        String jquery = get("stability.wait.jquery");
+        if (!jquery.isEmpty()) cfg.setWaitForJQueryInactive(bool("stability.wait.jquery"));
+
+        String fastRecovery = get("stability.fast.recovery.seconds");
+        if (!fastRecovery.isEmpty()) cfg.setFastRecoveryTimeout(Duration.ofSeconds(Long.parseLong(fastRecovery.trim())));
+
+        String cacheWindow = get("stability.cache.window.millis");
+        if (!cacheWindow.isEmpty()) cfg.setStabilityCacheWindow(Duration.ofMillis(Long.parseLong(cacheWindow.trim())));
+
+        cfg.setWatchdogConfig(watchdogConfig());
+
+        return cfg;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -165,10 +250,14 @@ public class ConfigLoader {
     }
 
     private static WebConfig.Browser parseBrowser(String value) {
-        switch (value.toLowerCase()) {
-            case "firefox": return WebConfig.Browser.FIREFOX;
-            case "edge":    return WebConfig.Browser.EDGE;
-            default:        return WebConfig.Browser.CHROME;
+        switch (value.toLowerCase().replaceAll("[^a-z]", "")) {
+            case "firefox":                         return WebConfig.Browser.FIREFOX;
+            case "edge":                            return WebConfig.Browser.EDGE;
+            case "ie":
+            case "internetexplorer":
+            case "ie11":
+            case "iexplore":                        return WebConfig.Browser.IE;
+            default:                                return WebConfig.Browser.CHROME;
         }
     }
 
@@ -180,5 +269,12 @@ public class ConfigLoader {
             case "legacy":  return WebConfig.ScoringProfile.LEGACY;
             default:        return WebConfig.ScoringProfile.DEFAULT;
         }
+    }
+
+    private static List<String> parseList(String csv) {
+        return Arrays.stream(csv.split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .collect(Collectors.toList());
     }
 }

@@ -86,15 +86,6 @@
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- ── Jackson YAML ──────────────────────────────────────────────────
-             Permite leer framework-config.yml con ObjectMapper.
-        ──────────────────────────────────────────────────────────────────── -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.dataformat</groupId>
-            <artifactId>jackson-dataformat-yaml</artifactId>
-            <version>${jackson.version}</version>
-        </dependency>
-
         <!-- ── SQLite JDBC ───────────────────────────────────────────────────
              Persistencia local del historial de repairs (RepairRepository).
         ──────────────────────────────────────────────────────────────────── -->

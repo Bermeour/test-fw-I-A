@@ -71,6 +71,11 @@ public class WebConfig {
     private final String         healingUrl;
     private final ScoringProfile scoringProfile;
 
+    // ── Driver local ──────────────────────────────────────────────
+    /** Directorio donde se encuentran los ejecutables del driver (ej: C:/Selenium/driver).
+     *  Vacío o null → Selenium Manager intenta descargarlo automáticamente. */
+    private final String driverPath;
+
     // ── Caché local de reparaciones ───────────────────────────────
     private final boolean repairCacheEnabled;
     private final String  repairDbPath;
@@ -99,7 +104,7 @@ public class WebConfig {
     private final Consumer<FirefoxOptions> firefoxCustomizer;
 
     /** Navegadores soportados. */
-    public enum Browser { CHROME, FIREFOX, EDGE }
+    public enum Browser { CHROME, FIREFOX, EDGE, IE }
 
     /**
      * Perfil de scoring del servicio de self-healing.
@@ -127,6 +132,7 @@ public class WebConfig {
         this.project                = b.project;
         this.healingUrl             = b.healingUrl;
         this.scoringProfile         = b.scoringProfile;
+        this.driverPath             = b.driverPath;
         this.repairCacheEnabled     = b.repairCacheEnabled;
         this.repairDbPath           = b.repairDbPath;
         this.repairCacheTtlDays     = b.repairCacheTtlDays;
@@ -150,6 +156,7 @@ public class WebConfig {
     public String         getProject()             { return project;              }
     public String         getHealingUrl()          { return healingUrl;           }
     public ScoringProfile getScoringProfile()      { return scoringProfile;       }
+    public String         getDriverPath()          { return driverPath;           }
     public boolean        isRepairCacheEnabled()   { return repairCacheEnabled;   }
     public String         getRepairDbPath()        { return repairDbPath;         }
     public int            getRepairCacheTtlDays()  { return repairCacheTtlDays;   }
@@ -198,6 +205,7 @@ public class WebConfig {
         private String         project         = "default";
         private String         healingUrl      = "http://localhost:8765";
         private ScoringProfile scoringProfile  = ScoringProfile.DEFAULT;
+        private String         driverPath      = "";
         // caché local
         private boolean repairCacheEnabled  = true;
         private String  repairDbPath        = "jdbc:sqlite:repair-history.db";
@@ -228,6 +236,20 @@ public class WebConfig {
 
         /** URL del servicio de self-healing. Por defecto: {@code http://localhost:8765}. */
         public Builder healingUrl(String url)      { this.healingUrl = url;  return this; }
+
+        /**
+         * Directorio local donde están los ejecutables del driver.
+         * El framework selecciona el ejecutable correcto según el navegador:
+         * {@code chromedriver.exe}, {@code msedgedriver.exe}, {@code geckodriver.exe},
+         * {@code IEDriverServer.exe}.
+         *
+         * <pre>{@code
+         * .driverPath("C:/Selenium/driver")
+         * }</pre>
+         *
+         * Si no se establece, Selenium Manager intenta descargarlo automáticamente.
+         */
+        public Builder driverPath(String path)     { this.driverPath = path; return this; }
 
         /**
          * Activa o desactiva el caché local SQLite de reparaciones. Por defecto: {@code true}.

@@ -3,7 +3,7 @@
 Framework Java sobre Selenium 4 con auto-reparación de selectores, acciones robustas,
 esperas inteligentes, assertions fluidas, manejo de popups y caché local de reparaciones.
 
-> **Versión:** 2.0.0 | **Java:** 11+ | **Selenium:** 4.20 | **Maven:** 3.6+
+> **Versión:** 2.0.0 | **Java:** 11+ | **Selenium:** 4.11 | **Maven:** 3.6+
 
 **Runner-agnostic** — el framework no depende de JUnit, TestNG ni Cucumber.
 El proyecto consumidor elige su runner y gestiona el ciclo de vida con `Web.init()` / `web.close()`.
@@ -41,10 +41,28 @@ El proyecto consumidor elige su runner y gestiona el ciclo de vida con `Web.init
 |---|---|---|
 | Java | 11 | Compatible con 17 y 21 |
 | Maven | 3.6 | |
-| Chrome / Firefox / Edge | Cualquier reciente | Selenium Manager descarga el driver automáticamente |
+| Chrome / Firefox / Edge / IE | Cualquier versión instalada | Ver tabla de drivers abajo |
 | Servicio self-healing | corriendo en `localhost:8765` | Microservicio Python independiente |
 
-El framework **no requiere instalar ChromeDriver manualmente**.
+### Drivers — instalación manual
+
+El framework **no descarga drivers automáticamente**. Descárgalos y colócalos en `C:\Selenium\driver\`:
+
+| Navegador | Ejecutable | Dónde descargarlo |
+|---|---|---|
+| Chrome | `chromedriver.exe` | Debe coincidir con la versión de Chrome instalada |
+| Edge | `msedgedriver.exe` | Debe coincidir con la versión de Edge instalada |
+| Firefox | `geckodriver.exe` | Cualquier versión reciente de GeckoDriver |
+| Internet Explorer | `IEDriverServer.exe` | IEDriverServer 32-bit (recomendado) |
+
+Configura la ruta en `config.properties`:
+
+```properties
+driver.path=C:/Selenium/driver
+```
+
+> La ruta puede sobreescribirse por test con `-Ddriver.path=...` o directamente con
+> `-Dwebdriver.chrome.driver=C:/ruta/chromedriver.exe`.
 
 ---
 
@@ -65,7 +83,7 @@ El framework **no arrastra JUnit como dependencia transitiva**. Declara tu runne
 <dependency>
     <groupId>org.junit.jupiter</groupId>
     <artifactId>junit-jupiter</artifactId>
-    <version>5.10.2</version>
+    <version>5.9.3</version>
     <scope>test</scope>
 </dependency>
 
@@ -89,10 +107,11 @@ El framework **no arrastra JUnit como dependencia transitiva**. Declara tu runne
 app.url     = http://mi-aplicacion.com
 app.project = portal_rrhh
 healing.url = http://localhost:8765
-driver.browser  = chrome
+driver.browser  = chrome        # chrome | firefox | edge | ie
 driver.headless = false
 driver.timeout.element  = 30
 driver.timeout.pageLoad = 60
+driver.path = C:/Selenium/driver
 ```
 
 ```java
@@ -139,6 +158,8 @@ public class Main {
 
 ### `config.properties` — referencia completa
 
+Este es el **único archivo de configuración** del framework (no existe `framework-config.yml`).
+
 ```properties
 # ── Aplicación ─────────────────────────────────────────────────
 app.url     = http://localhost:9000
@@ -150,21 +171,52 @@ healing.url             = http://localhost:8765
 healing.scoring_profile = default
 
 # ── Driver ─────────────────────────────────────────────────────
-driver.browser  = chrome        # chrome | firefox | edge
-driver.headless = false         # true en CI/CD
+driver.browser  = chrome        # chrome | firefox | edge | ie
+driver.headless = false         # true en CI/CD (no aplica a IE)
 driver.timeout.element  = 30
 driver.timeout.pageLoad = 60
+
+# Directorio con los drivers descargados manualmente
+# El ejecutable se selecciona automáticamente según driver.browser:
+#   chrome → chromedriver.exe | edge → msedgedriver.exe
+#   firefox → geckodriver.exe | ie  → IEDriverServer.exe
+driver.path = C:/Selenium/driver
 
 # ── Proxy (dejar vacíos si no hay proxy) ───────────────────────
 proxy.host =
 proxy.port =
 
-# ── Chrome: argumentos extra ────────────────────────────────────
+# ── Chrome/Edge: argumentos extra ──────────────────────────────
 # chrome.args = --window-size=1920,1080,--disable-extensions
 
-# ── Chrome: preferencias ────────────────────────────────────────
+# ── Chrome/Edge: preferencias ──────────────────────────────────
 # chrome.pref.download.default_directory = C:/descargas
 # chrome.pref.download.prompt_for_download = false
+
+# ── Caché local de reparaciones ────────────────────────────────
+repair.cache.enabled  = true
+repair.db.path        = jdbc:sqlite:repair-history.db
+repair.cache.ttl.days = 7       # 0 = sin expiración
+repair.cache.min.score = 80     # score mínimo (0-100) para reutilizar del caché
+
+# ── Watchdog ───────────────────────────────────────────────────
+watchdog.enabled       = true
+watchdog.loaders.block = true
+watchdog.overlays.block = true
+# Selectores CSS separados por comas
+watchdog.loader.selectors  = .loading,.spinner,.loader,[data-testid='loader']
+watchdog.overlay.selectors = .modal-backdrop,.overlay,.block-ui-wrapper,.ui-widget-overlay
+watchdog.modal.selectors   = .modal,[role='dialog'],.ui-dialog,.popup
+watchdog.error.selectors   = .error,.alert,.alert-danger,.message-error,.notification-error
+
+# ── Stability ──────────────────────────────────────────────────
+stability.timeout.seconds      = 8
+stability.polling.millis       = 250
+stability.max.retries          = 0
+stability.wait.document.ready  = true
+stability.wait.jquery          = false   # activar si la app usa jQuery
+stability.fast.recovery.seconds = 2
+stability.cache.window.millis  = 800
 ```
 
 ### `WebConfig` builder — configuración programática
@@ -173,12 +225,13 @@ proxy.port =
 WebConfig config = WebConfig.builder()
     .url("http://mi-app.com")
     .project("portal_rrhh")
-    .browser(WebConfig.Browser.CHROME)         // CHROME | FIREFOX | EDGE
-    .headless(true)
+    .browser(WebConfig.Browser.CHROME)         // CHROME | FIREFOX | EDGE | IE
+    .headless(true)                            // no aplica a IE
     .timeoutSeconds(45)
     .pageLoadTimeoutSeconds(90)
     .scoringProfile(WebConfig.ScoringProfile.ANGULAR)  // DEFAULT|SIEBEL|ANGULAR|LEGACY
     .healingUrl("http://localhost:8765")
+    .driverPath("C:/Selenium/driver")          // directorio con los drivers locales
     .proxy("proxy.empresa.com", 8080)
     .chromeArg("--window-size=1920,1080")
     .chromeArg("--disable-extensions")
@@ -195,6 +248,24 @@ WebConfig config = WebConfig.builder()
     .build();
 
 Web web = Web.init(config);
+```
+
+### `ConfigLoader` — métodos disponibles
+
+```java
+// Construye WebConfig desde config.properties (driver, healing, proxy, caché)
+WebConfig       config   = ConfigLoader.webConfig();
+
+// Construye WatchdogConfig desde config.properties (selectores watchdog.*)
+WatchdogConfig  watchdog = ConfigLoader.watchdogConfig();
+
+// Construye StabilityConfig desde config.properties (stability.* + watchdog integrado)
+StabilityConfig stability = ConfigLoader.stabilityConfig();
+
+// Acceso a propiedades individuales con override de system properties
+String  valor   = ConfigLoader.get("app.url");
+int     timeout = ConfigLoader.integer("driver.timeout.element");
+boolean headless = ConfigLoader.bool("driver.headless");
 ```
 
 ### Sobreescrituras en CI/CD
@@ -662,17 +733,20 @@ SiebelWaits.SPINNER_XPATH
 ### UiWatchdog — detectar qué bloquea la UI
 
 ```java
-WatchdogConfig config = new WatchdogConfig(
-    true,                                            // enabled
-    true,                                            // loadersBlockExecution
-    true,                                            // overlaysBlockExecution
-    Arrays.asList(".spinner", ".loading"),           // loaderSelectors
-    Arrays.asList(".modal-backdrop", ".overlay"),    // overlaySelectors
-    Arrays.asList("[role='dialog']"),                // modalSelectors
-    Arrays.asList(".alert-danger", ".error")         // errorSelectors
-);
+// Desde config.properties (recomendado)
+WatchdogConfig watchdogCfg = ConfigLoader.watchdogConfig();
 
-UiWatchdog watchdog = new UiWatchdog(driver, config);
+// O programáticamente con el API fluido
+WatchdogConfig watchdogCfg = WatchdogConfig.defaultConfig()
+    .setEnabled(true)
+    .setLoadersBlockExecution(true)
+    .setOverlaysBlockExecution(true)
+    .setLoaderSelectors(Arrays.asList(".spinner", ".loading"))
+    .setOverlaySelectors(Arrays.asList(".modal-backdrop", ".overlay"))
+    .setModalSelectors(Arrays.asList("[role='dialog']"))
+    .setErrorSelectors(Arrays.asList(".alert-danger", ".error"));
+
+UiWatchdog watchdog = new UiWatchdog(driver, watchdogCfg);
 WatchdogResult result = watchdog.inspect();
 
 // result.getStatus() → CLEAN | LOADER_DETECTED | OVERLAY_DETECTED |
@@ -687,8 +761,11 @@ if (result.isBlocking()) {
 ### StabilityWait — esperar que la UI esté estable
 
 ```java
+// Desde config.properties (incluye watchdog integrado)
+StabilityConfig cfg = ConfigLoader.stabilityConfig();
+
+// O con defaults hardcodeados (timeout=8s, polling=250ms, cacheWindow=800ms)
 StabilityConfig cfg = StabilityConfig.defaultConfig();
-// defaultTimeoutSeconds=8, pollingMillis=250, stabilityCacheWindow=800ms
 
 StabilityWait stability = new StabilityWait(driver, cfg);
 

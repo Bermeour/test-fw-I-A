@@ -23,6 +23,10 @@ import org.openqa.selenium.edge.EdgeOptions;
 import org.openqa.selenium.firefox.FirefoxDriver;
 import org.openqa.selenium.firefox.FirefoxOptions;
 
+import org.openqa.selenium.ie.InternetExplorerDriver;
+import org.openqa.selenium.ie.InternetExplorerOptions;
+
+import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
 
@@ -290,6 +294,8 @@ public class Web {
      * </ol>
      */
     private static WebDriver buildDriver(WebConfig config) {
+        applyDriverPath(config);
+
         WebDriver driver;
 
         switch (config.getBrowser()) {
@@ -299,6 +305,10 @@ public class Web {
 
             case EDGE:
                 driver = new EdgeDriver(buildEdgeOptions(config));
+                break;
+
+            case IE:
+                driver = new InternetExplorerDriver(buildIeOptions(config));
                 break;
 
             case CHROME:
@@ -313,6 +323,29 @@ public class Web {
             Duration.ofSeconds(config.getPageLoadTimeoutSeconds()));
 
         return driver;
+    }
+
+    /**
+     * Registra la ruta del ejecutable del driver como system property antes de crear el driver.
+     * Solo actúa si {@code config.getDriverPath()} está definido y la propiedad no fue ya
+     * sobreescrita desde la línea de comandos ({@code -Dwebdriver.chrome.driver=...}).
+     */
+    private static void applyDriverPath(WebConfig config) {
+        String dir = config.getDriverPath();
+        if (dir == null || dir.isBlank()) return;
+
+        String propKey;
+        String exeName;
+        switch (config.getBrowser()) {
+            case FIREFOX: propKey = "webdriver.gecko.driver";  exeName = "geckodriver.exe";    break;
+            case EDGE:    propKey = "webdriver.edge.driver";   exeName = "msedgedriver.exe";   break;
+            case IE:      propKey = "webdriver.ie.driver";     exeName = "IEDriverServer.exe"; break;
+            default:      propKey = "webdriver.chrome.driver"; exeName = "chromedriver.exe";   break;
+        }
+
+        if (System.getProperty(propKey) == null) {
+            System.setProperty(propKey, dir + File.separator + exeName);
+        }
     }
 
     // ── Construcción de ChromeOptions en 3 capas ─────────────────────────────
@@ -396,6 +429,24 @@ public class Web {
         // Capa 3 — escape hatch
         if (config.getFirefoxCustomizer() != null)
             config.getFirefoxCustomizer().accept(opts);
+
+        return opts;
+    }
+
+    // ── Construcción de InternetExplorerOptions ──────────────────────────────
+
+    private static InternetExplorerOptions buildIeOptions(WebConfig config) {
+        InternetExplorerOptions opts = new InternetExplorerOptions();
+
+        // Necesario en entornos corporativos donde las zonas de seguridad
+        // de IE no están uniformemente configuradas
+        opts.introduceFlakinessByIgnoringSecurityDomains();
+
+        // Ignora si el nivel de zoom no está al 100% (frecuente en PCs corporativas)
+        opts.ignoreZoomSettings();
+
+        // Proxy
+        if (config.hasProxy()) opts.setProxy(buildProxy(config));
 
         return opts;
     }
